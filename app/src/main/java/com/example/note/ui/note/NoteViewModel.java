@@ -4,6 +4,7 @@ import android.app.Application;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.lifecycle.AndroidViewModel;
 import androidx.lifecycle.LiveData;
 import androidx.lifecycle.MediatorLiveData;
@@ -15,6 +16,7 @@ import com.example.note.data.entity.Template;
 import com.example.note.data.entity.Column;
 import com.example.note.data.entity.Cell;
 import com.example.note.data.entity.CellType;
+import com.example.note.data.model.FilterOption;
 import com.example.note.data.repository.NotebookRepository;
 import com.example.note.data.repository.TemplateRepository;
 import com.example.note.data.repository.ColumnRepository;
@@ -27,6 +29,7 @@ import java.util.Set;
 import java.util.HashSet;
 import java.util.Stack;
 import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.HashMap;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -99,6 +102,9 @@ public class NoteViewModel extends AndroidViewModel {
     // 行顺序追踪字段
     private int[] originalRowOrder = null; // 初次加载时建立，不再修改
     private int[] currentRowOrder = null; // 最近一次排序的行序
+    
+    // 当前可见的"原始行索引"；null 代表未筛选（全部可见）
+    private List<Integer> activeVisibleRows = null;
     
     public NoteViewModel(@NonNull Application application) {
         super(application);
@@ -559,6 +565,10 @@ public class NoteViewModel extends AndroidViewModel {
         }
         _scrollableColumnsCells.postValue(scrollableCells);
         
+        // ✅ 同步初始化源数据缓存（深拷贝）
+        sourceFrozenCells = deepCopyCells(frozenCells);
+        sourceScrollableCells = deepCopyCells(scrollableCells);
+        
         _rowCount.postValue(rows);
         _columnCount.postValue(cols);
     }
@@ -640,104 +650,26 @@ public class NoteViewModel extends AndroidViewModel {
     
 
     /**
-     * 按列排序 - 重新实现版本
+     * 按列排序 - 简化版本，只更新排序状态然后调用统一渲染
      * @param columnIndex 列索引
      * @param sortOrder 排序方式：null=默认(按创建顺序), "ASC"=升序, "DESC"=降序
      */
     public void sortByColumn(int columnIndex, String sortOrder) {
         Integer rows = _rowCount.getValue();
         Integer cols = _columnCount.getValue();
-        // 使用源数据缓存而不是当前LiveData
-        List<Cell> frozen = sourceFrozenCells;
-        List<Cell> scrollable = sourceScrollableCells;
-        
-        if (rows == null || cols == null || rows <= 0 || cols <= 0 || frozen == null || scrollable == null) {
-            return;
-        }
-        
-        // 实现单列排序限制：重置其他列的排序状态
-        List<Column> columns = _columns.getValue();
-        if (columns != null) {
-            for (Column column : columns) {
-                if (column.getColumnIndex() != columnIndex) {
-                    column.setSortOrder(null); // 重置其他列的排序状态
-                }
+        if (rows == null || cols == null || rows < 0 || cols <= 0) return;
+
+        // 只做"单列排序状态管理"
+        List<Column> colsDef = _columns.getValue();
+        if (colsDef != null) {
+            for (Column c : colsDef) {
+                c.setSortOrder(c.getColumnIndex() == columnIndex ? sortOrder : null);
             }
-            // 更新当前列的排序状态
-            for (Column column : columns) {
-                if (column.getColumnIndex() == columnIndex) {
-                    column.setSortOrder(sortOrder);
-                    break;
-                }
-            }
-            _columns.postValue(columns); // 触发UI更新
+            _columns.postValue(colsDef);
         }
-        
-        // 默认排序：使用originalRowOrder恢复原始顺序
-        if (sortOrder == null || sortOrder.isEmpty()) {
-            if (originalRowOrder != null && originalRowOrder.length == rows) {
-                int[] order = argsortByArray(originalRowOrder);
-                // 更新currentRowOrder为原始顺序
-                currentRowOrder = originalRowOrder.clone();
-                List<List<Cell>> grid = buildFullGrid(frozen, scrollable, rows, cols);
-                emitGridInOrder(grid, order);
-                markAsModified();
-                return;
-            } else {
-                // 如果originalRowOrder不存在，使用自然顺序
-                int[] order = new int[rows];
-                for (int i = 0; i < rows; i++) {
-                    order[i] = i;
-                }
-                List<List<Cell>> grid = buildFullGrid(frozen, scrollable, rows, cols);
-                emitGridInOrder(grid, order);
-                markAsModified();
-                return;
-            }
-        }
-        
-        // 重建网格
-        List<List<Cell>> grid = buildFullGrid(frozen, scrollable, rows, cols);
-        
-        // 生成行索引并排序
-        Integer[] rowIdx = new Integer[rows];
-        for (int i = 0; i < rows; i++) {
-            rowIdx[i] = i;
-        }
-        
-        // 新的排序逻辑：空值统一排到末尾
-        Comparator<Integer> rowCmp = (r1, r2) -> {
-            String s1 = getCellContent(grid.get(r1).get(columnIndex));
-            String s2 = getCellContent(grid.get(r2).get(columnIndex));
-            
-            // 空值处理：空值排在最后
-            if (s1.isEmpty() && s2.isEmpty()) return 0;
-            if (s1.isEmpty()) return 1;  // 空值排到末尾
-            if (s2.isEmpty()) return -1; // 空值排到末尾
-            
-            // 非空值比较
-            int cmp = compareExcelStyleNonEmpty(s1, s2);
-            return "DESC".equals(sortOrder) ? -cmp : cmp;
-        };
-        
-        java.util.Arrays.sort(rowIdx, rowCmp);
-        
-        // 转为基本类型数组并发射
-        int[] order = new int[rows];
-        for (int i = 0; i < rows; i++) {
-            order[i] = rowIdx[i];
-        }
-        
-        // 更新currentRowOrder
-        if (currentRowOrder == null || currentRowOrder.length != rows) {
-            currentRowOrder = new int[rows];
-        }
-        for (int i = 0; i < rows; i++) {
-            currentRowOrder[i] = order[i];
-        }
-        
-        emitGridInOrder(grid, order);
-        markAsModified();
+
+        // 统一渲染（会对 activeVisibleRows 这批"可见行"应用排序/恢复默认顺序）
+        refreshViewRespectingFilterAndSort();
     }
     
     /**
@@ -920,6 +852,109 @@ public class NoteViewModel extends AndroidViewModel {
     }
     
     /**
+     * 创建单元格的展示副本，使用指定的原始行键生成稳定ID
+     * @param original 原始单元格
+     * @param displayRowIndex 展示用的行索引
+     * @param rowKey 原始行键，用于生成稳定ID
+     * @return 展示副本
+     */
+    private Cell createDisplayCopy(Cell original, int displayRowIndex, int rowKey) {
+        Cell copy = new Cell();
+        copy.setNotebookId(original.getNotebookId());
+        copy.setRowIndex(displayRowIndex);
+        copy.setColIndex(original.getColIndex());
+        copy.setContent(original.getContent());
+        copy.setTextColor(original.getTextColor());
+        copy.setBackgroundColor(original.getBackgroundColor());
+        copy.setBold(original.isBold());
+        copy.setItalic(original.isItalic());
+        copy.setTextSize(original.getTextSize());
+        copy.setTextAlignment(original.getTextAlignment());
+        copy.setImageId(original.getImageId());
+        
+        // 使用传入的原始行键生成稳定ID
+        long stableId = ((long) rowKey << 16) | (original.getColIndex() & 0xFFFF);
+        copy.setId(stableId);
+        
+        return copy;
+    }
+
+    /**
+     * 统一渲染管线：基于源缓存、可见行集合和当前排序状态输出到LiveData
+     */
+    private void refreshViewRespectingFilterAndSort() {
+        // 1) 获取源数据总行数和总列数
+        int rows = totalRowsFromSource();
+        int cols = totalColsFromColumns();
+        if (rows <= 0 || cols <= 0) {
+            _frozenColumnCells.postValue(new ArrayList<>());
+            _scrollableColumnsCells.postValue(new ArrayList<>());
+            _rowCount.postValue(0);
+            return;
+        }
+
+        // 2) 基于源缓存构建完整网格
+        List<List<Cell>> grid = buildFullGrid(sourceFrozenCells, sourceScrollableCells, rows, cols);
+
+        // 3) 确定候选行（筛选逻辑）
+        List<Integer> candidates;
+        if (activeVisibleRows == null) {
+            // 未筛选：全部行
+            candidates = new ArrayList<>();
+            for (int i = 0; i < rows; i++) {
+                candidates.add(i);
+            }
+        } else {
+            // 已筛选：只取可见行
+            candidates = new ArrayList<>(activeVisibleRows);
+        }
+
+        // 4) 应用排序（如果有）
+        Column sortedCol = getSortedColumnDef();
+        if (sortedCol != null) {
+            final int sortCol = sortedCol.getColumnIndex();
+            final boolean desc = "DESC".equals(sortedCol.getSortOrder());
+            candidates.sort((r1, r2) -> {
+                String s1 = getCellContent(grid.get(r1).get(sortCol));
+                String s2 = getCellContent(grid.get(r2).get(sortCol));
+                if (s1.isEmpty() && s2.isEmpty()) return 0;
+                if (s1.isEmpty()) return 1;   // 空值末尾
+                if (s2.isEmpty()) return -1;
+                int c = compareExcelStyleNonEmpty(s1, s2);
+                return desc ? -c : c;
+            });
+        }
+
+        // 5) 构建"可见 grid"，并更新 currentRowOrder（显示行 -> 原始行）
+        List<List<Cell>> viewGrid = new ArrayList<>(candidates.size());
+        currentRowOrder = new int[candidates.size()];
+        for (int i = 0; i < candidates.size(); i++) {
+            int ori = candidates.get(i);
+            viewGrid.add(grid.get(ori));
+            currentRowOrder[i] = ori;
+        }
+
+        // 6) 发射（identity order，因为 viewGrid 已按显示顺序排列）
+        int[] order = new int[viewGrid.size()];
+        for (int i = 0; i < order.length; i++) order[i] = i;
+
+        emitGridInOrder(viewGrid, order);
+        _rowCount.postValue(viewGrid.size());
+        markAsModified();
+    }
+
+    @Nullable
+    private Column getSortedColumnDef() {
+        List<Column> cs = _columns.getValue();
+        if (cs == null) return null;
+        for (Column c : cs) {
+            String so = c.getSortOrder();
+            if (so != null && !so.isEmpty()) return c;
+        }
+        return null;
+    }
+    
+    /**
      * 构建完整的行网格结构，为空位补齐占位Cell
      * @param frozen 冻结列单元格列表
      * @param scrollable 可滚动列单元格列表
@@ -988,9 +1023,18 @@ public class NoteViewModel extends AndroidViewModel {
             int oldRow = rowOrder[newRow];
             if (oldRow >= 0 && oldRow < rows) {
                 List<Cell> oldRowCells = grid.get(oldRow);
+                
+                // ✅ 用该行原始行号作为 rowKey，避免过滤后错位
+                int rowKey;
+                if (oldRowCells != null && !oldRowCells.isEmpty()) {
+                    rowKey = oldRowCells.get(0).getRowIndex(); // 这就是原始行索引
+                } else {
+                    rowKey = oldRow; // 兜底
+                }
+                
                 for (int c = 0; c < cols; c++) {
                     if (c < oldRowCells.size()) {
-                        Cell copied = createDisplayCopy(oldRowCells.get(c), newRow);
+                        Cell copied = createDisplayCopy(oldRowCells.get(c), newRow, rowKey);
                         if (c == 0) {
                             newFrozen.add(copied);
                         } else {
@@ -1039,10 +1083,19 @@ public class NoteViewModel extends AndroidViewModel {
             return;
         }
         
+        // 行号映射：将显示行号转换为原始行号
+        final int originalRow;
+        if (currentRowOrder != null && row < currentRowOrder.length) {
+            originalRow = currentRowOrder[row];
+            Log.d(TAG, "Row mapping: display row " + row + " -> original row " + originalRow);
+        } else {
+            originalRow = row;
+        }
+        
         // 更新内存中的数据（不触发LiveData更新，避免干扰编辑）
         Cell targetCell = null;
         if (col == 0) {
-            // 更新冻结列
+            // 更新冻结列（使用显示行号查找显示数据）
             List<Cell> frozenCells = _frozenColumnCells.getValue();
             if (frozenCells != null) {
                 for (Cell cell : frozenCells) {
@@ -1056,10 +1109,10 @@ public class NoteViewModel extends AndroidViewModel {
                 // _frozenColumnCells.postValue(frozenCells);
             }
             
-            // 同步更新源数据缓存
+            // 同步更新源数据缓存（使用原始行号）
             if (sourceFrozenCells != null) {
                 for (Cell cell : sourceFrozenCells) {
-                    if (cell.getRowIndex() == row && cell.getColIndex() == col) {
+                    if (cell.getRowIndex() == originalRow && cell.getColIndex() == col) {
                         cell.setContent(value);
                         break;
                     }
@@ -1080,10 +1133,10 @@ public class NoteViewModel extends AndroidViewModel {
                 // _scrollableColumnsCells.postValue(scrollableCells);
             }
             
-            // 同步更新源数据缓存
+            // 同步更新源数据缓存（使用原始行号）
             if (sourceScrollableCells != null) {
                 for (Cell cell : sourceScrollableCells) {
-                    if (cell.getRowIndex() == row && cell.getColIndex() == col) {
+                    if (cell.getRowIndex() == originalRow && cell.getColIndex() == col) {
                         cell.setContent(value);
                         break;
                     }
@@ -1091,18 +1144,18 @@ public class NoteViewModel extends AndroidViewModel {
             }
         }
         
-        // 立即保存到数据库（编辑即保存）
+        // 立即保存到数据库（编辑即保存，使用原始行号）
         if (targetCell != null) {
             targetCell.setNotebookId(currentNotebook.getId());
-            cellRepository.updateCellContent(currentNotebook.getId(), row, col, value, new CellRepository.RepositoryCallback<Void>() {
+            cellRepository.updateCellContent(currentNotebook.getId(), originalRow, col, value, new CellRepository.RepositoryCallback<Void>() {
                 @Override
                 public void onSuccess(Void result) {
-                    Log.d(TAG, "Cell saved: (" + row + ", " + col + ") = " + value);
+                    Log.d(TAG, "Cell saved: (" + originalRow + ", " + col + ") = " + value);
                 }
                 
                 @Override
                 public void onError(Exception e) {
-                    Log.e(TAG, "Failed to save cell: (" + row + ", " + col + ")", e);
+                    Log.e(TAG, "Failed to save cell: (" + originalRow + ", " + col + ")", e);
                     _errorMessage.postValue("保存失败: " + e.getMessage());
                 }
             });
@@ -1141,6 +1194,13 @@ public class NoteViewModel extends AndroidViewModel {
                             newCell.setColIndex(newColIndex);
                             newCell.setContent("");
                             scrollableCells.add(newCell);
+                            
+                            // 同步更新源数据缓存
+                            Cell sourceCell = new Cell();
+                            sourceCell.setRowIndex(row);
+                            sourceCell.setColIndex(newColIndex);
+                            sourceCell.setContent("");
+                            sourceScrollableCells.add(sourceCell);
                         }
                         _scrollableColumnsCells.postValue(scrollableCells);
                     }
@@ -1424,6 +1484,13 @@ public class NoteViewModel extends AndroidViewModel {
                     }
                 }
                 
+                // 同步更新源缓存的列索引
+                for (Cell cell : sourceScrollableCells) {
+                    if (cell.getColIndex() >= position) {
+                        cell.setColIndex(cell.getColIndex() + 1);
+                    }
+                }
+                
                 // 插入新的单元格
                 for (int row = 0; row < currentRows; row++) {
                     Cell newCell = new Cell();
@@ -1435,6 +1502,17 @@ public class NoteViewModel extends AndroidViewModel {
                         newCell.setContent("");
                     }
                     scrollableCells.add(row * currentColumns.size() + position - 1, newCell);
+                    
+                    // 同步插入到源缓存
+                    Cell sourceCell = new Cell();
+                    sourceCell.setRowIndex(row);
+                    sourceCell.setColIndex(position);
+                    if (row == 0) {
+                        sourceCell.setContent("标题" + (position + 1));
+                    } else {
+                        sourceCell.setContent("");
+                    }
+                    sourceScrollableCells.add(row * currentColumns.size() + position - 1, sourceCell);
                 }
                 _scrollableColumnsCells.postValue(scrollableCells);
             }
@@ -1538,6 +1616,16 @@ public class NoteViewModel extends AndroidViewModel {
                     }
                 }
                 _scrollableColumnsCells.postValue(scrollableCells);
+            }
+            
+            // 同步删除源缓存中的单元格
+            sourceScrollableCells.removeIf(cell -> cell.getColIndex() == position);
+            
+            // 同步更新源缓存中删除位置之后的列索引
+            for (Cell cell : sourceScrollableCells) {
+                if (cell.getColIndex() > position) {
+                    cell.setColIndex(cell.getColIndex() - 1);
+                }
             }
             
             _columnCount.postValue(currentColumns.size());
@@ -2127,18 +2215,47 @@ public class NoteViewModel extends AndroidViewModel {
      * 否则只显示选中值对应的行
      */
     public void filterByColumnValues(int columnIndex, Set<String> selectedValues) {
-        Notebook notebook = _currentNotebook.getValue();
-        if (notebook == null) {
-            return;
-        }
-        
-        // DataGrip风格：如果selectedValues为空，则显示全部数据（相当于清除筛选）
+        // 1) 空集合或"全选" => 清除筛选
         if (selectedValues == null || selectedValues.isEmpty()) {
-            reloadData();
+            activeVisibleRows = null;
+            refreshViewRespectingFilterAndSort();
             return;
         }
-        
-        // 使用源数据进行筛选，确保数据一致性
+
+        // 2) 用源缓存计算该列所有值
+        List<Cell> allSourceCells = getSourceCells();
+        if (allSourceCells.isEmpty()) return;
+
+        Set<String> allColumnValues = new HashSet<>();
+        for (Cell cell : allSourceCells) {
+            if (cell.getColIndex() == columnIndex) {
+                allColumnValues.add(cell.getContent() != null ? cell.getContent() : "");
+            }
+        }
+        if (selectedValues.containsAll(allColumnValues)) {
+            activeVisibleRows = null;
+            refreshViewRespectingFilterAndSort();
+            return;
+        }
+
+        // 3) 求可见的"原始行索引"
+        Set<Integer> valid = new HashSet<>();
+        for (Cell cell : allSourceCells) {
+            if (cell.getColIndex() == columnIndex) {
+                String v = cell.getContent() != null ? cell.getContent() : "";
+                if (selectedValues.contains(v)) valid.add(cell.getRowIndex());
+            }
+        }
+
+        // 4) 记录为状态 + 渲染（排序会在渲染阶段应用）
+        activeVisibleRows = new ArrayList<>(valid);
+        refreshViewRespectingFilterAndSort();
+    }
+
+    /**
+     * 获取源数据单元格列表
+     */
+    public List<Cell> getSourceCells() {
         List<Cell> allSourceCells = new ArrayList<>();
         if (sourceFrozenCells != null) {
             allSourceCells.addAll(sourceFrozenCells);
@@ -2146,59 +2263,7 @@ public class NoteViewModel extends AndroidViewModel {
         if (sourceScrollableCells != null) {
             allSourceCells.addAll(sourceScrollableCells);
         }
-        
-        if (allSourceCells.isEmpty()) {
-            return;
-        }
-        
-        // 获取指定列的所有唯一值
-        Set<String> allColumnValues = new HashSet<>();
-        for (Cell cell : allSourceCells) {
-            if (cell.getColIndex() == columnIndex) {
-                String cellValue = cell.getContent() != null ? cell.getContent() : "";
-                allColumnValues.add(cellValue);
-            }
-        }
-        
-        // DataGrip风格：如果选中了所有值，则显示全部数据
-        if (selectedValues.containsAll(allColumnValues)) {
-            reloadData();
-            return;
-        }
-        
-        // 筛选出指定列值在选中值集合中的行
-        Set<Integer> validRowIndices = new HashSet<>();
-        
-        // 首先找出所有符合条件的行索引
-        for (Cell cell : allSourceCells) {
-            if (cell.getColIndex() == columnIndex) {
-                String cellValue = cell.getContent() != null ? cell.getContent() : "";
-                if (selectedValues.contains(cellValue)) {
-                    validRowIndices.add(cell.getRowIndex());
-                }
-            }
-        }
-        
-        // 然后获取这些行的所有单元格
-        List<Cell> filteredFrozenCells = new ArrayList<>();
-        List<Cell> filteredScrollableCells = new ArrayList<>();
-        
-        for (Cell cell : allSourceCells) {
-            if (validRowIndices.contains(cell.getRowIndex())) {
-                if (cell.getColIndex() == 0) {
-                    filteredFrozenCells.add(cell);
-                } else {
-                    filteredScrollableCells.add(cell);
-                }
-            }
-        }
-        
-        // 更新显示的数据
-        _frozenColumnCells.postValue(filteredFrozenCells);
-        _scrollableColumnsCells.postValue(filteredScrollableCells);
-        
-        // 更新行数
-        _rowCount.postValue(validRowIndices.size());
+        return allSourceCells;
     }
     
     /**
@@ -2350,18 +2415,165 @@ public class NoteViewModel extends AndroidViewModel {
         return result;
     }
     
+
+
     /**
-     * 获取源数据（未筛选的原始数据）
-     * @return 所有源数据单元格
+     * 获取源数据的总行数
+     * @return 源数据的总行数
      */
-    public List<Cell> getSourceCells() {
-        List<Cell> allSourceCells = new ArrayList<>();
+    private int totalRowsFromSource() {
+        int max = -1;
         if (sourceFrozenCells != null) {
-            allSourceCells.addAll(sourceFrozenCells);
+            for (Cell c : sourceFrozenCells) {
+                max = Math.max(max, c.getRowIndex());
+            }
         }
         if (sourceScrollableCells != null) {
-            allSourceCells.addAll(sourceScrollableCells);
+            for (Cell c : sourceScrollableCells) {
+                max = Math.max(max, c.getRowIndex());
+            }
         }
-        return allSourceCells;
+        return max + 1;
+    }
+
+    /**
+     * 获取总列数（基于列定义）
+     * @return 总列数
+     */
+    private int totalColsFromColumns() {
+        List<Column> cs = _columns.getValue();
+        return (cs == null) ? 0 : cs.size();
+    }
+    
+    /**
+     * 构建指定列的值计数列表（根据修改建议.md要求）
+     * @param columnIndex 列索引
+     * @return FilterOption列表，包含值、显示文本、计数和选中状态
+     */
+    public List<FilterOption> buildValueCountsForColumn(int columnIndex) {
+        return buildValueCountsForColumn(columnIndex, false);
+    }
+    
+    /**
+     * 构建指定列的值计数列表（支持多列联动筛选）
+     * @param columnIndex 列索引
+     * @param respectCurrentFilter 是否基于当前筛选结果统计（true=多列联动，false=基于源数据）
+     * @return FilterOption列表，包含值、显示文本、计数和选中状态
+     */
+    public List<FilterOption> buildValueCountsForColumn(int columnIndex, boolean respectCurrentFilter) {
+        List<Cell> sourceCells;
+        
+        if (respectCurrentFilter) {
+            // 基于当前筛选结果统计（多列联动模式）
+            sourceCells = new ArrayList<>();
+            List<Cell> frozenCells = _frozenColumnCells.getValue();
+            List<Cell> scrollableCells = _scrollableColumnsCells.getValue();
+            
+            if (frozenCells != null) {
+                sourceCells.addAll(frozenCells);
+            }
+            if (scrollableCells != null) {
+                sourceCells.addAll(scrollableCells);
+            }
+        } else {
+            // 基于源数据统计（独立筛选模式）
+            sourceCells = getSourceCells();
+        }
+        
+        Map<String, Integer> valueCountMap = new HashMap<>();
+        
+        // 如果源数据为空，直接返回空列表，不回退到当前显示数据
+        if (sourceCells.isEmpty()) {
+            Log.w(TAG, "Source cells is empty, returning empty filter options");
+            return new ArrayList<>();
+        }
+        
+        // 统计指定列的值出现次数（包含所有行）
+        Log.d(TAG, "Building value counts for column " + columnIndex + ", source cells count: " + sourceCells.size());
+        for (Cell cell : sourceCells) {
+            if (cell.getColIndex() == columnIndex) {
+                String value = cell.getContent() != null ? cell.getContent() : "";
+                int currentCount = valueCountMap.getOrDefault(value, 0);
+                valueCountMap.put(value, currentCount + 1);
+                Log.d(TAG, "Column " + columnIndex + ", row " + cell.getRowIndex() + ", value '" + value + "' count: " + (currentCount + 1));
+            }
+        }
+        
+        // 转换为FilterOption列表
+        List<FilterOption> filterOptions = new ArrayList<>();
+        for (Map.Entry<String, Integer> entry : valueCountMap.entrySet()) {
+            filterOptions.add(new FilterOption(entry.getKey(), entry.getValue(), true));
+        }
+        
+        // 按计数降序排序，计数相同时按值升序，空值排在最后
+        filterOptions.sort((a, b) -> {
+            // 空值处理：空值排在最后
+            if (a.value.isEmpty() && b.value.isEmpty()) return 0;
+            if (a.value.isEmpty()) return 1;
+            if (b.value.isEmpty()) return -1;
+            
+            // 按计数降序排序
+            int countCompare = Integer.compare(b.count, a.count);
+            if (countCompare != 0) {
+                return countCompare;
+            }
+            
+            // 计数相同时按值升序排序
+            return a.value.compareToIgnoreCase(b.value);
+        });
+        
+        Log.d(TAG, "Built " + filterOptions.size() + " filter options for column " + columnIndex);
+        return filterOptions;
+    }
+    
+    /**
+     * 应用值筛选（根据修改建议.md要求）
+     * @param columnIndex 列索引
+     * @param filterOptions 筛选选项列表
+     */
+    public void applyValueFilter(int columnIndex, List<FilterOption> filterOptions) {
+        if (filterOptions == null || filterOptions.isEmpty()) {
+            reloadData();
+            return;
+        }
+        
+        // 收集选中的值
+        Set<String> selectedValues = new HashSet<>();
+        boolean hasSelection = false;
+        boolean allSelected = true;
+        
+        for (FilterOption option : filterOptions) {
+            if (option.checked) {
+                selectedValues.add(option.value);
+                hasSelection = true;
+            } else {
+                allSelected = false;
+            }
+        }
+        
+        // DataGrip风格逻辑：未选中任何值或全选时显示全部数据
+        if (!hasSelection || allSelected) {
+            reloadData();
+            return;
+        }
+        
+        // 应用筛选
+        filterByColumnValues(columnIndex, selectedValues);
+    }
+    
+    /**
+     * 重新应用当前的排序状态
+     * 用于在筛选后保持排序顺序
+     */
+    private void reapplyCurrentSort() {
+        refreshViewRespectingFilterAndSort();
+    }
+
+    /**
+     * 清除筛选
+     */
+    public void clearFilter() {
+        activeVisibleRows = null;
+        refreshViewRespectingFilterAndSort();
     }
 }

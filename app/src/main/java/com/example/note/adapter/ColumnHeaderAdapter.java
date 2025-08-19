@@ -21,7 +21,10 @@ import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 import com.example.note.R;
 import com.example.note.data.entity.Column;
-import com.example.note.ui.note.DataGripFilterDialog;
+import com.example.note.data.model.FilterOption;
+import com.example.note.ui.note.LocalFilterDialog;
+import com.example.note.ui.note.NoteViewModel;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -47,7 +50,7 @@ public class ColumnHeaderAdapter extends RecyclerView.Adapter<ColumnHeaderAdapte
     private Handler saveHandler = new Handler(Looper.getMainLooper());
     private Runnable saveRunnable;
     private android.content.Context context;
-    private com.example.note.ui.note.NoteViewModel noteViewModel;
+    private NoteViewModel noteViewModel;
     private long currentNotebookId;
     
     // 排序状态跟踪
@@ -92,7 +95,7 @@ public class ColumnHeaderAdapter extends RecyclerView.Adapter<ColumnHeaderAdapte
         this.context = context;
     }
     
-    public void setNoteViewModel(com.example.note.ui.note.NoteViewModel noteViewModel) {
+    public void setNoteViewModel(NoteViewModel noteViewModel) {
         this.noteViewModel = noteViewModel;
     }
     
@@ -299,7 +302,51 @@ public class ColumnHeaderAdapter extends RecyclerView.Adapter<ColumnHeaderAdapte
         
         // 设置筛选按钮点击事件
         holder.filterButton.setOnClickListener(v -> {
-            showImprovedFilterDialog(position);
+            if (noteViewModel != null && context != null && position < columns.size()) {
+                Column column = columns.get(position);
+                
+                // 构建筛选选项
+                List<FilterOption> filterOptions = noteViewModel.buildValueCountsForColumn(column.getColumnIndex());
+                
+                // 显示筛选对话框
+                LocalFilterDialog.show(context, column, filterOptions, new LocalFilterDialog.OnFilterListener() {
+                    @Override
+                    public void onFilterApplied(Column column, List<FilterOption> filterOptions) {
+                        // 应用筛选
+                        noteViewModel.applyValueFilter(column.getColumnIndex(), filterOptions);
+                        
+                        // 更新筛选状态
+                        filterStates[position] = true;
+                        notifyItemChanged(position);
+                        
+                        // 通知外部监听器
+                        if (filterListener != null) {
+                            Set<String> selectedValues = new java.util.HashSet<>();
+                            for (FilterOption option : filterOptions) {
+                                if (option.checked) {
+                                    selectedValues.add(option.value);
+                                }
+                            }
+                            filterListener.onColumnFilterApplied(position, selectedValues);
+                        }
+                    }
+                    
+                    @Override
+                    public void onFilterCleared(Column column) {
+                        // 清除筛选
+                        noteViewModel.applyValueFilter((int)column.getId(), null);
+                        
+                        // 更新筛选状态
+                        filterStates[position] = false;
+                        notifyItemChanged(position);
+                        
+                        // 通知外部监听器
+                        if (filterListener != null) {
+                            filterListener.onColumnFilterClear(position);
+                        }
+                    }
+                });
+            }
         });
     }
     
@@ -325,42 +372,7 @@ public class ColumnHeaderAdapter extends RecyclerView.Adapter<ColumnHeaderAdapte
         holder.filterIndicator.setVisibility(filterStates[position] ? View.VISIBLE : View.GONE);
     }
     
-    private void showImprovedFilterDialog(int columnIndex) {
-        if (context instanceof Activity) {
-            Activity activity = (Activity) context;
-            
-            // 获取列的所有值
-            List<String> columnValues = getColumnValues(columnIndex);
-            
-            DataGripFilterDialog dialog = new DataGripFilterDialog(
-                activity, 
-                columns.get(columnIndex), 
-                columnValues,
-                new DataGripFilterDialog.OnFilterListener() {
-                    @Override
-                    public void onFilterApplied(Column column, Set<String> selectedValues) {
-                        if (filterListener != null) {
-                            filterListener.onColumnFilterApplied(columnIndex, selectedValues);
-                        }
-                        // DataGrip风格：根据选择状态更新筛选指示器
-                        filterStates[columnIndex] = selectedValues != null && !selectedValues.isEmpty();
-                        notifyItemChanged(columnIndex);
-                    }
-                    
-                    @Override
-                    public void onFilterCleared(Column column) {
-                        if (filterListener != null) {
-                            filterListener.onColumnFilterClear(columnIndex);
-                        }
-                        filterStates[columnIndex] = false;
-                        notifyItemChanged(columnIndex);
-                    }
-                }
-            );
-            
-            dialog.show();
-        }
-    }
+
       
       private void setupFilterMenuEvents(View popupView, PopupWindow popupWindow, int columnIndex) {
           // TODO: 实现筛选菜单的事件处理逻辑

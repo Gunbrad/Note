@@ -41,38 +41,24 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="8dp"
         android:background="?attr/colorSurface"
+        android:padding="8dp"
         android:gravity="center_vertical">
-
-        <ImageView
-            android:layout_width="16dp"
-            android:layout_height="16dp"
-            android:src="@drawable/ic_search"
-            android:layout_marginStart="8dp"
-            android:layout_marginEnd="8dp"
-            android:alpha="0.6" />
 
         <EditText
             android:id="@+id/et_search"
             android:layout_width="0dp"
             android:layout_height="32dp"
             android:layout_weight="1"
-            android:background="@null"
-            android:hint="搜索"
+            android:background="@drawable/bg_cell_editing"
+            android:hint="搜索值..."
             android:textSize="12sp"
-            android:textColorHint="?attr/colorOnSurfaceVariant"
-            android:textColor="?attr/colorOnSurface"
-            android:inputType="text"
-            android:maxLines="1" />
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:maxLines="1"
+            android:imeOptions="actionSearch" />
 
     </LinearLayout>
-
-    <!-- 分隔线 -->
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="?attr/colorOutlineVariant" />
 
     <!-- 列表头部 -->
     <LinearLayout
@@ -80,10 +66,7 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:background="?attr/colorSurfaceVariant"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp"
+        android:padding="8dp"
         android:gravity="center_vertical">
 
         <CheckBox
@@ -100,7 +83,8 @@
             android:text="值"
             android:textSize="12sp"
             android:textStyle="bold"
-            android:textColor="?attr/colorOnSurfaceVariant" />
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:layout_marginEnd="8dp" />
 
         <TextView
             android:layout_width="wrap_content"
@@ -109,26 +93,19 @@
             android:textSize="12sp"
             android:textStyle="bold"
             android:textColor="?attr/colorOnSurfaceVariant"
-            android:layout_marginStart="8dp" />
+            android:minWidth="40dp"
+            android:gravity="end" />
 
     </LinearLayout>
-
-    <!-- 分隔线 -->
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="?attr/colorOutlineVariant" />
 
     <!-- 筛选值列表 -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/rv_filter_values"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:background="?attr/colorSurface"
-        android:scrollbars="vertical" />
+        android:layout_weight="1" />
 
-    <!-- 底部操作栏 -->
+    <!-- 页脚信息 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -142,29 +119,26 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="选择一个复选框来筛选行"
             android:textSize="11sp"
-            android:textColor="?attr/colorOnSurfaceVariant" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_ok"
-            android:layout_width="wrap_content"
-            android:layout_height="32dp"
-            android:text="确定"
-            android:textSize="12sp"
-            android:minWidth="60dp"
-            android:layout_marginStart="8dp"
-            style="@style/Widget.Material3.Button.UnelevatedButton" />
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:text="选择一个复选框来筛选行" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_cancel"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="32dp"
             android:text="取消"
             android:textSize="12sp"
-            android:minWidth="60dp"
-            android:layout_marginStart="4dp"
-            style="@style/Widget.Material3.Button.TextButton" />
+            android:layout_marginEnd="4dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_ok"
+            style="@style/Widget.Material3.Button"
+            android:layout_width="wrap_content"
+            android:layout_height="32dp"
+            android:text="确定"
+            android:textSize="12sp" />
 
     </LinearLayout>
 
