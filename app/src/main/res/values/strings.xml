@@ -1,0 +1,71 @@
+<resources>
+    <string name="app_name">Note</string>
+    
+    <!-- 主页相关 -->
+    <string name="search_hint">搜索笔记本...</string>
+    <string name="empty_state_title">还没有笔记本</string>
+    <string name="empty_state_subtitle">点击右下角的 + 按钮创建第一个笔记本</string>
+    <string name="create_notebook">创建笔记本</string>
+    <string name="notebook_title_hint">笔记本标题</string>
+    <string name="notebook_description_hint">描述（可选）</string>
+    <string name="create">创建</string>
+    <string name="cancel">取消</string>
+    
+    <!-- 菜单项 -->
+    <string name="menu_sort">排序</string>
+    <string name="menu_filter">筛选</string>
+    <string name="menu_layout">布局</string>
+    <string name="menu_settings">设置</string>
+    
+    <!-- 排序选项 -->
+    <string name="sort_by_modified">按修改时间</string>
+    <string name="sort_by_created">按创建时间</string>
+    <string name="sort_by_title">按标题</string>
+    <string name="sort_ascending">升序</string>
+    <string name="sort_descending">降序</string>
+    
+    <!-- 筛选选项 -->
+    <string name="filter_all">全部</string>
+    <string name="filter_pinned">置顶</string>
+    <string name="filter_normal">普通</string>
+    <string name="filter_archived">归档</string>
+    
+    <!-- 笔记本操作 -->
+    <string name="action_open">打开</string>
+    <string name="action_pin">置顶</string>
+    <string name="action_unpin">取消置顶</string>
+    <string name="action_archive">归档</string>
+    <string name="action_unarchive">取消归档</string>
+    <string name="action_delete">删除</string>
+    <string name="action_rename">重命名</string>
+    <string name="action_duplicate">复制</string>
+    
+    <!-- 时间格式 -->
+    <string name="time_just_now">刚刚</string>
+    <string name="time_minutes_ago">%d分钟前</string>
+    <string name="time_hours_ago">%d小时前</string>
+    <string name="time_days_ago">%d天前</string>
+    <string name="time_format_date">MM月dd日</string>
+    <string name="time_format_year">yyyy年MM月dd日</string>
+    
+    <!-- 提示信息 -->
+    <string name="notebook_created">笔记本已创建</string>
+    <string name="notebook_deleted">笔记本已删除</string>
+    <string name="notebook_archived">笔记本已归档</string>
+    <string name="notebook_pinned">笔记本已置顶</string>
+    <string name="action_undo">撤销</string>
+    
+    <!-- 错误信息 -->
+    <string name="error_title_empty">标题不能为空</string>
+    <string name="error_title_too_long">标题过长</string>
+    <string name="error_create_failed">创建失败，请重试</string>
+    
+    <!-- 确认对话框 -->
+    <string name="confirm_delete_title">删除笔记本</string>
+    <string name="confirm_delete_message">确定要删除这个笔记本吗？此操作不可撤销。</string>
+    <string name="delete">删除</string>
+    
+    <!-- 副标题格式 -->
+    <string name="subtitle_cell_count">%d个单元格</string>
+    <string name="subtitle_empty">空笔记本</string>
+</resources>

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 笔记本卡片尺寸 -->
+    <dimen name="notebook_card_min_height">120dp</dimen>
+    <dimen name="notebook_card_height_small">120dp</dimen>
+    <dimen name="notebook_card_height_medium">140dp</dimen>
+    <dimen name="notebook_card_height_large">160dp</dimen>
+    <dimen name="notebook_card_line_height">20dp</dimen>
+    <dimen name="notebook_card_margin">4dp</dimen>
+    <dimen name="notebook_card_padding">16dp</dimen>
+    <dimen name="notebook_card_corner_radius">12dp</dimen>
+    <dimen name="notebook_card_elevation">2dp</dimen>
+
+    <!-- 颜色指示器 -->
+    <dimen name="color_indicator_width">4dp</dimen>
+    <dimen name="color_indicator_height">24dp</dimen>
+
+    <!-- 图标尺寸 -->
+    <dimen name="icon_small">16dp</dimen>
+    <dimen name="icon_medium">24dp</dimen>
+    <dimen name="icon_large">32dp</dimen>
+
+    <!-- 间距 -->
+    <dimen name="spacing_tiny">4dp</dimen>
+    <dimen name="spacing_small">8dp</dimen>
+    <dimen name="spacing_medium">16dp</dimen>
+    <dimen name="spacing_large">24dp</dimen>
+    <dimen name="spacing_xlarge">32dp</dimen>
+
+    <!-- 文本尺寸 -->
+    <dimen name="text_size_small">12sp</dimen>
+    <dimen name="text_size_medium">14sp</dimen>
+    <dimen name="text_size_large">16sp</dimen>
+    <dimen name="text_size_xlarge">18sp</dimen>
+    <dimen name="text_size_title">20sp</dimen>
+
+    <!-- 搜索栏 -->
+    <dimen name="search_bar_height">48dp</dimen>
+    <dimen name="search_bar_corner_radius">24dp</dimen>
+    <dimen name="search_bar_padding">16dp</dimen>
+
+    <!-- FAB -->
+    <dimen name="fab_margin">16dp</dimen>
+
+    <!-- 列表间距 -->
+    <dimen name="recycler_view_padding">8dp</dimen>
+
+    <!-- 空状态 -->
+    <dimen name="empty_state_icon_size">120dp</dimen>
+    <dimen name="empty_state_spacing">16dp</dimen>
+
+    <!-- 预览图 -->
+    <dimen name="preview_image_size">32dp</dimen>
+    <dimen name="preview_image_corner_radius">4dp</dimen>
+</resources>

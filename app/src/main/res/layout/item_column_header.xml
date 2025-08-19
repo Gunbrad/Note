@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="120dp"
+    android:layout_height="40dp"
+    android:orientation="vertical"
+    android:background="@drawable/bg_column_header">
+
+    <!-- 顶部：列名和操作按钮 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <EditText
+            android:id="@+id/column_name_edit"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center_vertical|start"
+            android:text="列A"
+            android:textSize="12sp"
+            android:textColor="#495057"
+            android:textStyle="bold"
+            android:paddingStart="6dp"
+            android:paddingEnd="2dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:background="@android:color/transparent"
+            android:focusable="true"
+            android:focusableInTouchMode="true"
+            android:selectAllOnFocus="true"
+            android:imeOptions="actionDone" />
+
+        <!-- 排序按钮 -->
+        <ImageView
+            android:id="@+id/sort_button"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_marginEnd="2dp"
+            android:src="@drawable/ic_sort_default"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:padding="2dp"
+            android:contentDescription="排序" />
+
+        <!-- 筛选按钮 -->
+        <ImageView
+            android:id="@+id/filter_button"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_marginEnd="2dp"
+            android:src="@drawable/ic_filter"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:padding="2dp"
+            android:contentDescription="筛选" />
+
+        <!-- 调整列宽的拖拽手柄 -->
+        <View
+            android:id="@+id/column_resize_handle"
+            android:layout_width="4dp"
+            android:layout_height="match_parent"
+            android:background="#E0E0E0" />
+
+    </LinearLayout>
+
+    <!-- 底部：筛选状态指示器（可选显示） -->
+    <View
+        android:id="@+id/filter_indicator"
+        android:layout_width="match_parent"
+        android:layout_height="2dp"
+        android:background="#2196F3"
+        android:visibility="gone" />
+
+</LinearLayout>

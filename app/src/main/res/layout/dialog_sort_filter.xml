@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <!-- 标题 -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="排序与筛选"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:textColor="?android:attr/textColorPrimary"
+        android:layout_marginBottom="16dp" />
+
+    <!-- 排序部分 -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="排序方式"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:textColor="?android:attr/textColorPrimary"
+        android:layout_marginBottom="8dp" />
+
+    <RadioGroup
+        android:id="@+id/radio_group_sort"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="24dp">
+
+        <RadioButton
+            android:id="@+id/radio_title_asc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="标题升序"
+            android:padding="8dp" />
+
+        <RadioButton
+            android:id="@+id/radio_title_desc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="标题降序"
+            android:padding="8dp" />
+
+        <RadioButton
+            android:id="@+id/radio_created_asc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="创建时间升序"
+            android:padding="8dp" />
+
+        <RadioButton
+            android:id="@+id/radio_created_desc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="创建时间降序"
+            android:padding="8dp" />
+
+        <RadioButton
+            android:id="@+id/radio_updated_asc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="更新时间升序"
+            android:padding="8dp" />
+
+        <RadioButton
+            android:id="@+id/radio_updated_desc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="更新时间降序"
+            android:padding="8dp"
+            android:checked="true" />
+
+    </RadioGroup>
+
+    <!-- 颜色筛选部分 -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="颜色筛选"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:textColor="?android:attr/textColorPrimary"
+        android:layout_marginBottom="8dp" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recycler_colors"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="24dp" />
+
+    <!-- 按钮区域 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="end">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_clear_filters"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="清除筛选"
+            android:layout_marginEnd="8dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_cancel"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="取消"
+            android:layout_marginEnd="8dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_apply"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="应用" />
+
+    </LinearLayout>
+
+</LinearLayout>

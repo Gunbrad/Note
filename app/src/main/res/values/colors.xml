@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 基础颜色 -->
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!-- 主题色 -->
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+
+    <!-- 搜索栏颜色 -->
+    <color name="search_background">#33FFFFFF</color>
+    <color name="search_text_color">#FFFFFF</color>
+    <color name="search_hint_color">#CCFFFFFF</color>
+    <color name="search_icon_color">#CCFFFFFF</color>
+
+    <!-- 笔记本默认颜色 -->
+    <color name="default_notebook_color">#FF2196F3</color>
+
+    <!-- 笔记本主题色调色板 -->
+    <color name="notebook_blue">#FF2196F3</color>
+    <color name="notebook_green">#FF4CAF50</color>
+    <color name="notebook_orange">#FFFF9800</color>
+    <color name="notebook_red">#FFF44336</color>
+    <color name="notebook_purple">#FF9C27B0</color>
+    <color name="notebook_teal">#FF009688</color>
+    <color name="notebook_indigo">#FF3F51B5</color>
+    <color name="notebook_pink">#FFE91E63</color>
+    <color name="notebook_brown">#FF795548</color>
+    <color name="notebook_grey">#FF607D8B</color>
+
+    <!-- 笔记本背景色（淡化版本） -->
+    <color name="notebook_blue_bg">#1A2196F3</color>
+    <color name="notebook_green_bg">#1A4CAF50</color>
+    <color name="notebook_orange_bg">#1AFF9800</color>
+    <color name="notebook_red_bg">#1AF44336</color>
+    <color name="notebook_purple_bg">#1A9C27B0</color>
+    <color name="notebook_teal_bg">#1A009688</color>
+    <color name="notebook_indigo_bg">#1A3F51B5</color>
+    <color name="notebook_pink_bg">#1AE91E63</color>
+    <color name="notebook_brown_bg">#1A795548</color>
+    <color name="notebook_grey_bg">#1A607D8B</color>
+
+    <!-- 状态颜色 -->
+    <color name="success_color">#FF4CAF50</color>
+    <color name="warning_color">#FFFF9800</color>
+    <color name="error_color">#FFF44336</color>
+    <color name="info_color">#FF2196F3</color>
+
+    <!-- 文本颜色 -->
+    <color name="text_primary">#DE000000</color>
+    <color name="text_secondary">#99000000</color>
+    <color name="text_disabled">#61000000</color>
+    <color name="text_hint">#61000000</color>
+
+    <!-- 背景颜色 -->
+    <color name="background_primary">#FFFFFFFF</color>
+    <color name="background_secondary">#FFF5F5F5</color>
+    <color name="surface_color">#FFFFFFFF</color>
+    <color name="divider_color">#1F000000</color>
+
+    <!-- 透明度 -->
+    <color name="transparent">#00000000</color>
+    <color name="semi_transparent">#80000000</color>
+
+    <!-- 表格单元格相关颜色 -->
+    <color name="cell_selection_color">#E3F2FD</color>
+    <color name="cell_border_color">#E0E0E0</color>
+    <color name="cell_editing_border">#2196F3</color>
+    <color name="table_background">#FAFAFA</color>
+
+</resources>

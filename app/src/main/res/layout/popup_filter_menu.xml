@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="280dp"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/bg_popup_menu"
+    android:padding="16dp">
+
+    <!-- 标题 -->
+    <TextView
+        android:id="@+id/filter_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="筛选条件"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:textColor="#212529"
+        android:layout_marginBottom="12dp" />
+
+    <!-- 筛选类型选择 -->
+    <RadioGroup
+        android:id="@+id/filter_type_group"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginBottom="12dp">
+
+        <RadioButton
+            android:id="@+id/filter_text_contains"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="文本包含"
+            android:checked="true" />
+
+        <RadioButton
+            android:id="@+id/filter_number_range"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="数字区间" />
+
+        <RadioButton
+            android:id="@+id/filter_date_range"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="日期区间" />
+
+        <RadioButton
+            android:id="@+id/filter_boolean"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="布尔值" />
+
+    </RadioGroup>
+
+    <!-- 文本包含输入 -->
+    <LinearLayout
+        android:id="@+id/text_filter_layout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginBottom="12dp">
+
+        <EditText
+            android:id="@+id/text_filter_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="输入要搜索的文本"
+            android:singleLine="true" />
+
+    </LinearLayout>
+
+    <!-- 数字区间输入 -->
+    <LinearLayout
+        android:id="@+id/number_filter_layout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="12dp"
+        android:visibility="gone">
+
+        <EditText
+            android:id="@+id/number_min_input"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="最小值"
+            android:inputType="numberDecimal"
+            android:singleLine="true" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="  -  "
+            android:gravity="center" />
+
+        <EditText
+            android:id="@+id/number_max_input"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="最大值"
+            android:inputType="numberDecimal"
+            android:singleLine="true" />
+
+    </LinearLayout>
+
+    <!-- 日期区间输入 -->
+    <LinearLayout
+        android:id="@+id/date_filter_layout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginBottom="12dp"
+        android:visibility="gone">
+
+        <Button
+            android:id="@+id/date_start_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="选择开始日期"
+            android:layout_marginBottom="8dp"
+            style="@style/Widget.Material3.Button.OutlinedButton" />
+
+        <Button
+            android:id="@+id/date_end_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="选择结束日期"
+            style="@style/Widget.Material3.Button.OutlinedButton" />
+
+    </LinearLayout>
+
+    <!-- 布尔值选择 -->
+    <LinearLayout
+        android:id="@+id/boolean_filter_layout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="12dp"
+        android:visibility="gone">
+
+        <RadioGroup
+            android:id="@+id/boolean_value_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/boolean_true"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="是" />
+
+            <RadioButton
+                android:id="@+id/boolean_false"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="否" />
+
+        </RadioGroup>
+
+    </LinearLayout>
+
+    <!-- 操作按钮 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="end">
+
+        <Button
+            android:id="@+id/filter_clear_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="清除"
+            android:layout_marginEnd="8dp"
+            style="@style/Widget.Material3.Button.TextButton" />
+
+        <Button
+            android:id="@+id/filter_apply_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="应用" />
+
+    </LinearLayout>
+
+</LinearLayout>
