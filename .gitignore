@@ -1,6 +1,9 @@
 *.iml
 .gradle
 /local.properties
+
+# Trae AI rules
+.trae/
 /.idea/caches
 /.idea/libraries
 /.idea/modules.xml
