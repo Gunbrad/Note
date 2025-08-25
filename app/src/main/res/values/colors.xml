@@ -10,6 +10,18 @@
     <color name="purple_700">#FF3700B3</color>
     <color name="teal_200">#FF03DAC5</color>
     <color name="teal_700">#FF018786</color>
+    
+    <!-- 固定紫白主题颜色 -->
+    <color name="theme_primary">#9C27B0</color>
+    <color name="theme_primary_variant">#7B1FA2</color>
+    <color name="theme_secondary">#E1BEE7</color>
+    <color name="theme_secondary_variant">#CE93D8</color>
+    <color name="theme_background">#FFFFFF</color>
+    <color name="theme_surface">#FFFFFF</color>
+    <color name="theme_on_primary">#FFFFFF</color>
+    <color name="theme_on_secondary">#000000</color>
+    <color name="theme_on_background">#000000</color>
+    <color name="theme_on_surface">#000000</color>
 
     <!-- 搜索栏颜色 -->
     <color name="search_background">#33FFFFFF</color>

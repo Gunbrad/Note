@@ -30,6 +30,11 @@ public class TableRowAdapter extends RecyclerView.Adapter<TableRowAdapter.TableR
     private ColumnWidthProvider widthProvider;
     private int globalHorizontalOffset = 0;
     
+    // 锚点缓存字段
+    private int anchorFirstColIndex = 0;
+    private int anchorOffsetInFirst = 0;
+    private boolean anchorValid = false;
+    
     public void setData(int rowCount, List<Column> columns, Map<String, Cell> cellsMap) {
         int newRowCount = Math.max(0, rowCount);
         List<Column> newColumns = columns != null ? new ArrayList<>(columns) : new ArrayList<>();
@@ -222,6 +227,15 @@ public class TableRowAdapter extends RecyclerView.Adapter<TableRowAdapter.TableR
         this.globalHorizontalOffset = offset;
     }
     
+    /**
+     * 设置水平锚点，用于精确对齐
+     */
+    public void setHorizontalAnchor(int firstColIndex, int offsetInFirst) {
+        this.anchorFirstColIndex = firstColIndex;
+        this.anchorOffsetInFirst = offsetInFirst;
+        this.anchorValid = true;
+    }
+    
     @NonNull
     @Override
     public TableRowViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
@@ -243,7 +257,10 @@ public class TableRowAdapter extends RecyclerView.Adapter<TableRowAdapter.TableR
     @Override
     public void onViewAttachedToWindow(@NonNull TableRowViewHolder holder) {
         super.onViewAttachedToWindow(holder);
-        if (widthProvider != null) {
+        // 优先使用锚点对齐
+        if (anchorValid) {
+            holder.applyAbsoluteOffsetWithColumnIndex(anchorFirstColIndex, anchorOffsetInFirst);
+        } else if (widthProvider != null) {
             int[] positionAndOffset = widthProvider.mapScrollXToPositionAndOffset(globalHorizontalOffset);
             holder.applyAbsoluteOffsetWithColumnIndex(positionAndOffset[0], positionAndOffset[1]);
         } else {
@@ -277,9 +294,37 @@ public class TableRowAdapter extends RecyclerView.Adapter<TableRowAdapter.TableR
             // 禁用ItemAnimator和过度滚动以防止动画干扰
             rowCellsRecycler.setItemAnimator(null);
             rowCellsRecycler.setOverScrollMode(View.OVER_SCROLL_NEVER);
+
+            // ★ 和 header 完全一致的 padding / clipToPadding
+            rowCellsRecycler.setClipToPadding(false);
+            rowCellsRecycler.setPadding(0, rowCellsRecycler.getPaddingTop(), 0, rowCellsRecycler.getPaddingBottom());
             
             // 禁用事件拆分，防止多指触控同时作用于多个子视图
             rowCellsRecycler.setMotionEventSplittingEnabled(false);
+            
+            // ★ 统一行单元格的 LayoutParams（与 header 保持一致）
+            rowCellsRecycler.addOnChildAttachStateChangeListener(new RecyclerView.OnChildAttachStateChangeListener() {
+                @Override
+                public void onChildViewAttachedToWindow(@NonNull View view) {
+                    if (widthProvider != null) {
+                        RecyclerView.LayoutParams lp = (RecyclerView.LayoutParams) view.getLayoutParams();
+                        int position = rowCellsRecycler.getChildAdapterPosition(view);
+                        if (position >= 0 && position < columns.size()) {
+                            // 强制宽度为 widthProvider 的像素值
+                            lp.width = widthProvider.getColumnWidthPx(position);
+                            // 清零左右边距
+                            lp.leftMargin = 0;
+                            lp.rightMargin = 0;
+                            view.setLayoutParams(lp);
+                        }
+                    }
+                }
+
+                @Override
+                public void onChildViewDetachedFromWindow(@NonNull View view) {
+                    // 无需处理
+                }
+            });
             
             // 创建数据单元格适配器
             dataCellAdapter = new DataCellAdapter();
@@ -367,8 +412,10 @@ public class TableRowAdapter extends RecyclerView.Adapter<TableRowAdapter.TableR
                 dataCellAdapter.setColumnWidthProvider(widthProvider);
             }
             
-            // 应用绝对横向偏移
-            if (widthProvider != null) {
+            // 应用绝对横向偏移，优先使用锚点对齐
+            if (anchorValid) {
+                applyAbsoluteOffsetWithColumnIndex(anchorFirstColIndex, anchorOffsetInFirst);
+            } else if (widthProvider != null) {
                 int[] positionAndOffset = widthProvider.mapScrollXToPositionAndOffset(globalHorizontalOffset);
                 applyAbsoluteOffsetWithColumnIndex(positionAndOffset[0], positionAndOffset[1]);
             } else {

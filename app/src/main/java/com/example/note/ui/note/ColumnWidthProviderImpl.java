@@ -27,6 +27,11 @@ public class ColumnWidthProviderImpl implements ColumnWidthProvider {
     // 行高缓存，避免在主线程访问数据库
     private final Map<String, Float> rowHeightCache = new HashMap<>();
     
+    // ★ 像素宽度快照机制（修改建议3.md）
+    private int[] pixelWidthSnapshot = null;
+    private float lastSnapshotScale = -1f;
+    private int lastSnapshotColumnCount = -1;
+    
     // 默认尺寸（像素）
     private static final float DEFAULT_COLUMN_WIDTH_PX = 120f;
     private static final float DEFAULT_ROW_HEIGHT_PX = 44f;
@@ -46,6 +51,12 @@ public class ColumnWidthProviderImpl implements ColumnWidthProvider {
     
     @Override
     public int getColumnWidthPx(int columnIndex) {
+        // ★ 使用像素宽度快照确保一致性
+        ensurePixelWidthSnapshot();
+        if (pixelWidthSnapshot != null && columnIndex >= 0 && columnIndex < pixelWidthSnapshot.length) {
+            return pixelWidthSnapshot[columnIndex];
+        }
+        // 回退到原始计算
         float baseWidth = getBaseColumnWidth(columnIndex);
         return Math.round(baseWidth * getScale());
     }
@@ -135,6 +146,8 @@ public class ColumnWidthProviderImpl implements ColumnWidthProvider {
             Column column = columns.get(columnIndex);
             column.setWidth(baseWidth);
             noteViewModel.updateColumn(column);
+            // ★ 列宽变化时刷新像素宽度快照
+            invalidatePixelWidthSnapshot();
         }
     }
     
@@ -144,20 +157,36 @@ public class ColumnWidthProviderImpl implements ColumnWidthProvider {
         if (columns == null || columns.isEmpty()) {
             return new int[]{0, 0};
         }
+
+        // 严格限制 scrollX 范围，考虑视口宽度
+        int totalWidth = getTotalColumnsWidthPx();
+        int maxScroll = Math.max(0, totalWidth - 1); // 防止完全滚出视口
+        scrollX = Math.max(0, Math.min(scrollX, maxScroll));
         
+        int position = 0;
         int accumulatedWidth = 0;
+        
+        // 精确计算位置
         for (int i = 0; i < columns.size(); i++) {
             int columnWidth = getColumnWidthPx(i);
-            if (scrollX < accumulatedWidth + columnWidth) {
-                // 找到了第一个可见列
-                int offsetInFirstCol = scrollX - accumulatedWidth;
-                return new int[]{i, offsetInFirstCol};
+            if (accumulatedWidth + columnWidth > scrollX) {
+                position = i;
+                break;
             }
             accumulatedWidth += columnWidth;
+            position = i + 1; // 防止越界
         }
         
-        // 如果scrollX超出了所有列的总宽度，返回最后一列
-        return new int[]{columns.size() - 1, getColumnWidthPx(columns.size() - 1)};
+        // 确保 position 不超出范围
+        position = Math.min(position, columns.size() - 1);
+        
+        int offsetInFirst = Math.max(0, scrollX - accumulatedWidth);
+        // 限制偏移量不超过该列宽度
+        if (position < columns.size()) {
+            offsetInFirst = Math.min(offsetInFirst, getColumnWidthPx(position) - 1);
+        }
+        
+        return new int[]{position, offsetInFirst};
     }
     
     @Override
@@ -172,6 +201,8 @@ public class ColumnWidthProviderImpl implements ColumnWidthProvider {
             Column column = columns.get(columnIndex);
             column.setWidth(widthDp);
             noteViewModel.updateColumn(column);
+            // ★ 列宽变化时刷新像素宽度快照
+            invalidatePixelWidthSnapshot();
         }
     }
     
@@ -233,5 +264,79 @@ public class ColumnWidthProviderImpl implements ColumnWidthProvider {
      */
     public void clearCache() {
         rowHeightCache.clear();
+    }
+    
+    /**
+     * ★ 确保像素宽度快照是最新的（修改建议3.md）
+     * 使用最大余数法分配像素，确保header和rows的列宽完全一致
+     */
+    private void ensurePixelWidthSnapshot() {
+        List<Column> columns = noteViewModel.getColumns().getValue();
+        if (columns == null || columns.isEmpty()) {
+            pixelWidthSnapshot = null;
+            return;
+        }
+        
+        float currentScale = getScale();
+        int currentColumnCount = columns.size();
+        
+        // 检查是否需要重新计算快照
+        if (pixelWidthSnapshot == null || 
+            Math.abs(currentScale - lastSnapshotScale) > 0.001f ||
+            currentColumnCount != lastSnapshotColumnCount) {
+            
+            // 重新计算像素宽度快照
+            pixelWidthSnapshot = new int[currentColumnCount];
+            
+            // 计算每列的理论像素宽度（浮点数）
+            float[] theoreticalWidths = new float[currentColumnCount];
+            float totalTheoreticalWidth = 0f;
+            for (int i = 0; i < currentColumnCount; i++) {
+                theoreticalWidths[i] = getBaseColumnWidth(i) * currentScale;
+                totalTheoreticalWidth += theoreticalWidths[i];
+            }
+            
+            // 计算总的整数像素宽度
+            int totalIntegerWidth = Math.round(totalTheoreticalWidth);
+            
+            // 使用最大余数法分配像素
+            int allocatedWidth = 0;
+            float[] remainders = new float[currentColumnCount];
+            
+            // 第一轮：分配整数部分
+            for (int i = 0; i < currentColumnCount; i++) {
+                int integerPart = (int) theoreticalWidths[i];
+                pixelWidthSnapshot[i] = integerPart;
+                allocatedWidth += integerPart;
+                remainders[i] = theoreticalWidths[i] - integerPart;
+            }
+            
+            // 第二轮：分配剩余像素给余数最大的列
+            int remainingPixels = totalIntegerWidth - allocatedWidth;
+            for (int round = 0; round < remainingPixels; round++) {
+                int maxRemainderIndex = 0;
+                for (int i = 1; i < currentColumnCount; i++) {
+                    if (remainders[i] > remainders[maxRemainderIndex]) {
+                        maxRemainderIndex = i;
+                    }
+                }
+                pixelWidthSnapshot[maxRemainderIndex]++;
+                remainders[maxRemainderIndex] = 0f; // 已分配，清零余数
+            }
+            
+            // 更新快照状态
+            lastSnapshotScale = currentScale;
+            lastSnapshotColumnCount = currentColumnCount;
+        }
+    }
+    
+    /**
+     * ★ 强制刷新像素宽度快照
+     * 当列宽发生变化时调用
+     */
+    public void invalidatePixelWidthSnapshot() {
+        pixelWidthSnapshot = null;
+        lastSnapshotScale = -1f;
+        lastSnapshotColumnCount = -1;
     }
 }

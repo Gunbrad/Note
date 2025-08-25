@@ -1,7 +1,19 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
-    <style name="Base.Theme.Note" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your dark theme here. -->
-        <!-- <item name="colorPrimary">@color/my_dark_primary</item> -->
+    <!-- 固定使用浅色主题，不随系统暗色模式改变 -->
+    <style name="Base.Theme.Note" parent="Theme.Material3.Light.NoActionBar">
+        <!-- 固定紫白配色主题 -->
+        <item name="colorPrimary">@color/theme_primary</item>
+        <item name="colorPrimaryVariant">@color/theme_primary_variant</item>
+        <item name="colorOnPrimary">@color/theme_on_primary</item>
+        <item name="colorSecondary">@color/theme_secondary</item>
+        <item name="colorSecondaryVariant">@color/theme_secondary_variant</item>
+        <item name="colorOnSecondary">@color/theme_on_secondary</item>
+        <item name="android:colorBackground">@color/theme_background</item>
+        <item name="colorSurface">@color/theme_surface</item>
+        <item name="colorOnSurface">@color/theme_on_surface</item>
+        <item name="android:statusBarColor">@color/theme_primary</item>
+        <item name="android:navigationBarColor">@color/theme_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">true</item>
     </style>
 </resources>

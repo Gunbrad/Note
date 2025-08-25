@@ -328,9 +328,9 @@ public class NoteViewModel extends AndroidViewModel {
                     // 加载单元格数据（单元格数据加载时会设置正确的行数和列数）
                     loadCellData(notebookId);
                 } else {
-                    Log.d(TAG, "No existing columns found, creating default table structure");
-                    // 如果没有现有列数据，创建默认的表格结构
-                    initializeTableData(5, 5);
+                    Log.d(TAG, "No existing columns found, keeping empty table structure");
+                    // 如果没有现有列数据，保持空表格结构（0行0列）
+                    initializeEmptyTableData();
                     _isLoading.postValue(false);
                 }
             }
