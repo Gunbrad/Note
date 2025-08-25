@@ -1,6 +1,6 @@
 # Note APP
 
-> 🤖 **AI 项目** - 本项目是我用 Claude 3.5 Sonnet + GPT-5 开发完成的
+> 🤖 **AI 项目** - 本项目是我使用 Claude 3.5 Sonnet + GPT-5 开发完成的
 
 一款功能强大的 Android 表格笔记应用，专为高效数据管理和表格编辑而设计。采用现代化的 Material Design 界面，提供流畅的用户体验和丰富的表格编辑功能。
 
