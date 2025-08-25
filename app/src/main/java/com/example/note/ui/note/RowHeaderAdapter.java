@@ -22,6 +22,7 @@ public class RowHeaderAdapter extends RecyclerView.Adapter<RowHeaderAdapter.RowH
     private int rowCount = 0;
     private int rowHeightDp = 44; // 默认行高
     private OnRowClickListener listener;
+    private ColumnWidthProvider widthProvider;
     
     public interface OnRowClickListener {
         void onRowClick(int rowIndex);
@@ -60,9 +61,13 @@ public class RowHeaderAdapter extends RecyclerView.Adapter<RowHeaderAdapter.RowH
     
     public void updateRowHeight(int rowIndex, int heightDp) {
         if (rowIndex >= 0 && rowIndex < rowCount) {
-            this.rowHeightDp = heightDp;
+            // 只刷新项目，不设置本地字段，Provider是单一真相源
             notifyItemChanged(rowIndex);
         }
+    }
+    
+    public void setColumnWidthProvider(ColumnWidthProvider widthProvider) {
+        this.widthProvider = widthProvider;
     }
     
     @NonNull
@@ -96,9 +101,15 @@ public class RowHeaderAdapter extends RecyclerView.Adapter<RowHeaderAdapter.RowH
         public void bind(int rowNumber) {
             rowNumberText.setText(String.valueOf(rowNumber));
             
-            // 设置行高度
+            // 使用ColumnWidthProvider设置行高度
             ViewGroup.LayoutParams layoutParams = itemView.getLayoutParams();
-            layoutParams.height = (int) (rowHeightDp * itemView.getContext().getResources().getDisplayMetrics().density);
+            if (widthProvider != null) {
+                // 使用行索引获取该行的具体高度
+                layoutParams.height = widthProvider.getRowHeightPx(getAdapterPosition());
+            } else {
+                // 回退到原始方式
+                layoutParams.height = (int) (rowHeightDp * itemView.getContext().getResources().getDisplayMetrics().density);
+            }
             itemView.setLayoutParams(layoutParams);
             
             // 点击事件
@@ -128,6 +139,8 @@ public class RowHeaderAdapter extends RecyclerView.Adapter<RowHeaderAdapter.RowH
                 public boolean onTouch(View v, MotionEvent event) {
                     switch (event.getAction()) {
                         case MotionEvent.ACTION_DOWN:
+                            // 禁止父级拦截触摸事件
+                            v.getParent().requestDisallowInterceptTouchEvent(true);
                             startY = event.getRawY();
                             startHeight = rowHeightDp;
                             return true;
@@ -141,20 +154,29 @@ public class RowHeaderAdapter extends RecyclerView.Adapter<RowHeaderAdapter.RowH
                             lastUpdateTime = currentTime;
                             
                             float deltaY = event.getRawY() - startY;
-                            int newHeight = Math.max(40, (int) (startHeight + deltaY / itemView.getContext().getResources().getDisplayMetrics().density));
+                            int newHeightDp = Math.max(40, (int) (startHeight + deltaY / itemView.getContext().getResources().getDisplayMetrics().density));
                             
                             // 立即更新UI
                             ViewGroup.LayoutParams layoutParams = itemView.getLayoutParams();
-                            layoutParams.height = (int) (newHeight * itemView.getContext().getResources().getDisplayMetrics().density);
+                            layoutParams.height = (int) (newHeightDp * itemView.getContext().getResources().getDisplayMetrics().density);
                             itemView.setLayoutParams(layoutParams);
                             
+                            // 计算基准dp并写回Provider
+                            if (widthProvider != null) {
+                                float scale = widthProvider.getScale();
+                                float baseDp = newHeightDp / scale;
+                                widthProvider.setRowHeightDp((int) baseDp);
+                            }
+                            
                             if (listener != null) {
-                                listener.onRowResize(getAdapterPosition(), newHeight);
+                                listener.onRowResize(getAdapterPosition(), newHeightDp);
                             }
                             return true;
                             
                         case MotionEvent.ACTION_UP:
                         case MotionEvent.ACTION_CANCEL:
+                            // 释放触摸事件拦截
+                            v.getParent().requestDisallowInterceptTouchEvent(false);
                             return true;
                     }
                     return false;

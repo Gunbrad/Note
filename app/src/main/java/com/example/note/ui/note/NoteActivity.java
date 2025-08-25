@@ -24,6 +24,7 @@ import com.example.note.R;
 import com.example.note.adapter.ColumnHeaderAdapter;
 import com.example.note.data.entity.Cell;
 import com.example.note.data.entity.Column;
+import com.example.note.data.repository.RowRepository;
 import com.example.note.ui.note.ColumnSettingsDialog;
 
 import com.google.android.material.appbar.AppBarLayout;
@@ -60,6 +61,11 @@ public class NoteActivity extends AppCompatActivity {
     private RecyclerView columnHeadersRecycler;
     private RecyclerView rowHeadersRecycler;
     private RecyclerView dataRowsRecycler;
+    private ZoomPanLayout zoomPanLayout;
+    
+    // 新的缩放系统
+    private ZoomableRecyclerHost zoomableHost;
+    private ColumnWidthProvider widthProvider;
     
     // 适配器
     private ColumnHeaderAdapter columnHeaderAdapter;
@@ -77,6 +83,10 @@ public class NoteActivity extends AppCompatActivity {
     private Handler rowResizeHandler = new Handler(Looper.getMainLooper());
     private Runnable rowResizeRunnable;
     
+    // 自动保存Handler
+    private Handler autoSaveHandler = new Handler(Looper.getMainLooper());
+    private Runnable autoSaveRunnable;
+    
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -92,6 +102,15 @@ public class NoteActivity extends AppCompatActivity {
         handleIntent();
     }
     
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // 强制保存所有正在编辑的列头
+        if (columnHeaderAdapter != null) {
+            columnHeaderAdapter.forceFinishAllEditing();
+        }
+    }
+    
     private void initViews() {
         mainToolbar = findViewById(R.id.toolbar);
         appBarLayout = findViewById(R.id.app_bar_layout);
@@ -101,6 +120,7 @@ public class NoteActivity extends AppCompatActivity {
         columnHeadersRecycler = findViewById(R.id.column_headers_recycler);
         rowHeadersRecycler = findViewById(R.id.row_headers_recycler);
         dataRowsRecycler = findViewById(R.id.data_grid_recycler);
+        zoomPanLayout = findViewById(R.id.zoom_pan_layout);
         
         setSupportActionBar(mainToolbar);
         if (getSupportActionBar() != null) {
@@ -110,6 +130,12 @@ public class NoteActivity extends AppCompatActivity {
     
     private void initViewModel() {
         viewModel = new ViewModelProvider(this).get(NoteViewModel.class);
+        
+        // 初始化RowRepository
+        RowRepository rowRepository = RowRepository.getInstance(getApplication());
+        
+        // 初始化ColumnWidthProvider
+        widthProvider = new ColumnWidthProviderImpl(viewModel, this, rowRepository);
     }
     
     private void initAdapters() {
@@ -117,14 +143,21 @@ public class NoteActivity extends AppCompatActivity {
         columnHeaderAdapter = new ColumnHeaderAdapter(null);
         columnHeaderAdapter.setContext(this);
         columnHeaderAdapter.setNoteViewModel(viewModel);
+        columnHeaderAdapter.setColumnWidthProvider(widthProvider);
         if (notebookId > 0) {
             columnHeaderAdapter.setCurrentNotebookId(notebookId);
         }
         // 设置列宽调整监听器
         columnHeaderAdapter.setOnColumnResizeListener(new ColumnHeaderAdapter.OnColumnResizeListener() {
             @Override
-            public void onColumnResize(int columnIndex, float newWidth) {
-                updateColumnWidth(columnIndex, newWidth);
+            public void onColumnResize(int columnIndex, float newWidth, boolean isFinal) {
+                if (isFinal) {
+                    // 拖拽结束时的最终更新
+                    updateColumnWidthFinal(columnIndex, newWidth);
+                } else {
+                    // 拖拽过程中的临时更新
+                    updateColumnWidth(columnIndex, newWidth);
+                }
             }
         });
         
@@ -162,18 +195,41 @@ public class NoteActivity extends AppCompatActivity {
             }
         });
         
-        // 使用自定义LayoutManager禁用水平滚动
-        LinearLayoutManager columnLayoutManager = new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false) {
+        // 设置列头长按监听器
+        columnHeaderAdapter.setOnColumnLongClickListener(new ColumnHeaderAdapter.OnColumnLongClickListener() {
             @Override
-            public boolean canScrollHorizontally() {
-                return false; // 禁用水平滚动，防止列头拖拽导致错位
+            public void onColumnLongClick(int columnIndex) {
+                showDeleteColumnDialog(columnIndex);
             }
-        };
+        });
+        
+        // 设置实时更新监听器
+        columnHeaderAdapter.setOnColumnRealtimeUpdateListener(new ColumnHeaderAdapter.OnColumnRealtimeUpdateListener() {
+            @Override
+            public void onColumnRealtimeUpdate(int columnIndex, int newWidthPx) {
+                // 修改建议：ACTION_MOVE期间不写入widthProvider，只更新表格主体UI
+                // widthProvider的更新延迟到ACTION_UP时在onColumnResize中进行
+                
+                // 直接使用像素值更新表格主体的可见单元格，避免dp转换和Provider查询
+                if (tableRowAdapter != null) {
+                    tableRowAdapter.updateColumnWidthRealtimePx(dataRowsRecycler, columnIndex, newWidthPx);
+                }
+            }
+        });
+        
+        // 使用水平LinearLayoutManager，允许程序滚动
+        LinearLayoutManager columnLayoutManager = new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false);
         columnHeadersRecycler.setLayoutManager(columnLayoutManager);
         columnHeadersRecycler.setAdapter(columnHeaderAdapter);
         
+        // ✅ 禁用ItemAnimator防止拖拽时动画干扰
+        columnHeadersRecycler.setItemAnimator(null);
+        
+        // 删除addOnItemTouchListener全拦截代码，让父级ZoomableRecyclerHost能拿到水平手势
+        
         // 行头适配器
         rowHeaderAdapter = new RowHeaderAdapter();
+        rowHeaderAdapter.setColumnWidthProvider(widthProvider);
         rowHeaderAdapter.setOnRowClickListener(new RowHeaderAdapter.OnRowClickListener() {
             @Override
             public void onRowClick(int rowIndex) {
@@ -182,15 +238,13 @@ public class NoteActivity extends AppCompatActivity {
             
             @Override
             public void onRowLongClick(int rowIndex) {
-                // TODO: 处理行长按
+                showDeleteRowDialog(rowIndex);
             }
             
             @Override
             public void onRowResize(int rowIndex, int newHeight) {
-                // 更新行高 - 优化：转换为dp单位并延迟保存
-                float density = getResources().getDisplayMetrics().density;
-                int newHeightDp = Math.round(newHeight / density);
-                updateRowHeight(rowIndex, newHeightDp);
+                // 更新行高 - newHeight已经是dp单位，直接使用
+                updateRowHeight(rowIndex, newHeight);
                 
                 // 延迟保存到数据库，避免拖拽过程中频繁写入
                 rowResizeHandler.removeCallbacks(rowResizeRunnable);
@@ -207,6 +261,11 @@ public class NoteActivity extends AppCompatActivity {
     }
      
      private void updateRowHeight(int rowIndex, int newHeight) {
+         // 立即写回Provider，确保单一真相源
+         if (widthProvider != null) {
+             // 使用新的方法保存特定行的高度
+             widthProvider.setRowHeightDp(rowIndex, newHeight);
+         }
          // 更新行高
          if (rowHeaderAdapter != null) {
              rowHeaderAdapter.updateRowHeight(rowIndex, newHeight);
@@ -214,22 +273,58 @@ public class NoteActivity extends AppCompatActivity {
          if (tableRowAdapter != null) {
              tableRowAdapter.updateRowHeight(rowIndex, newHeight);
          }
-     }
+       }
      
      private void updateColumnWidth(int columnIndex, float newWidth) {
+         // ✅ 拖拽过程中的临时更新，实时更新可见单元格但不触发重绑定
          if (columns != null && columnIndex < columns.size()) {
              Column column = columns.get(columnIndex);
              column.setWidth(newWidth);
              
-             // 更新数据库中的列宽
-             viewModel.updateColumn(column);
-             
-             // 同步更新数据行的列宽
-             if (tableRowAdapter != null) {
-                 tableRowAdapter.updateColumnWidth(columnIndex, newWidth);
+             // ✅ 拖拽过程中实时更新Provider，让可见单元格立即响应
+             if (widthProvider != null) {
+                 widthProvider.setColumnWidthDp(columnIndex, newWidth);
              }
+             
+             // ✅ 拖拽过程中实时更新可见单元格，不触发重绑定
+             if (tableRowAdapter != null) {
+                 tableRowAdapter.updateColumnWidthRealtime(dataRowsRecycler, columnIndex, newWidth);
+             }
+             
+             // ❌ 拖拽过程中暂时不更新数据库，避免频繁IO
+             // viewModel.updateColumn(column);
          }
-      }
+       }
+       
+       /**
+        * 拖拽结束时的最终更新，包括Provider、数据库和表体同步
+        */
+       private void updateColumnWidthFinal(int columnIndex, float newWidth) {
+        if (columns != null && columnIndex < columns.size()) {
+            Column column = columns.get(columnIndex);
+            column.setWidth(newWidth);
+            
+            // ✅ 拖拽结束时确保Provider也被更新
+            if (widthProvider != null) {
+                widthProvider.setColumnWidthDp(columnIndex, newWidth);
+            }
+            
+            // ✅ 拖拽结束时才更新数据库
+            viewModel.updateColumn(column);
+            
+            // ✅ 拖拽结束时才同步更新表体，避免拖拽中频繁重绑定
+            if (tableRowAdapter != null) {
+                // 直接更新columns引用，然后只通知一次变化
+                tableRowAdapter.updateColumnWidth(columnIndex, newWidth);
+            }
+            
+            // ✅ 确保列头和单元格宽度完全同步：使用Provider的像素值进行最终同步
+            if (widthProvider != null && tableRowAdapter != null) {
+                int finalWidthPx = widthProvider.getColumnWidthPx(columnIndex);
+                tableRowAdapter.updateColumnWidthRealtimePx(dataRowsRecycler, columnIndex, finalWidthPx);
+            }
+        }
+    }
       
       private void updateColumnName(int columnIndex, String newName) {
          if (columns != null && columnIndex < columns.size()) {
@@ -299,6 +394,7 @@ public class NoteActivity extends AppCompatActivity {
      private void initTableRowAdapter() {
          // 表格行适配器
         tableRowAdapter = new TableRowAdapter();
+        tableRowAdapter.setColumnWidthProvider(widthProvider);
         tableRowAdapter.setCellChangeListener(new DataCellAdapter.OnCellChangeListener() {
             @Override
             public void onCellClick(int rowIndex, int columnIndex) {
@@ -321,30 +417,58 @@ public class NoteActivity extends AppCompatActivity {
         dataRowsRecycler.setLayoutManager(dataLayoutManager);
         dataRowsRecycler.setAdapter(tableRowAdapter);
         
+        // 初始化ZoomableRecyclerHost
+        initZoomableHost();
+        
         // 同步滚动
-        setupScrollSync();
+        // 滚动同步现在由ZoomableRecyclerHost处理
     }
     
-    private void setupScrollSync() {
-        // 同步行头和数据区域的垂直滚动
-        dataRowsRecycler.addOnScrollListener(new RecyclerView.OnScrollListener() {
-            @Override
-            public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
-                super.onScrolled(recyclerView, dx, dy);
-                rowHeadersRecycler.scrollBy(0, dy);
+    private void initZoomableHost() {
+        // 创建ZoomableRecyclerHost
+        zoomableHost = new ZoomableRecyclerHost(
+            this,
+            widthProvider,
+            dataRowsRecycler,     // bodyRV
+            columnHeadersRecycler, // headerRV  
+            rowHeadersRecycler,   // frozenRV
+            viewModel
+        );
+        
+        // 如果有ZoomPanLayout容器，将其替换为ZoomableRecyclerHost
+        if (zoomPanLayout != null && zoomPanLayout.getParent() instanceof android.view.ViewGroup) {
+            android.view.ViewGroup parent = (android.view.ViewGroup) zoomPanLayout.getParent();
+            int index = parent.indexOfChild(zoomPanLayout);
+            parent.removeView(zoomPanLayout);
+            parent.addView(zoomableHost, index, zoomPanLayout.getLayoutParams());
+            
+            // 将原来ZoomPanLayout的子视图移动到ZoomableRecyclerHost
+            while (zoomPanLayout.getChildCount() > 0) {
+                View child = zoomPanLayout.getChildAt(0);
+                zoomPanLayout.removeView(child);
+                zoomableHost.addView(child);
+            }
+        }
+        
+        // 设置视口状态为最大缩放状态
+        viewModel.updateViewport(2.5f, 0f, 0f);
+        
+        // 恢复视口状态
+        zoomableHost.restoreViewport();
+    }
+    
+    // setupScrollSync方法已移除，滚动同步现在由ZoomableRecyclerHost处理
+    
+    private void setupObservers() {
+        // 观察当前笔记本，用于预加载行高数据
+        viewModel.getCurrentNotebook().observe(this, notebook -> {
+            if (notebook != null && widthProvider instanceof ColumnWidthProviderImpl) {
+                // 预加载行高数据到缓存，避免主线程访问数据库
+                ColumnWidthProviderImpl impl = (ColumnWidthProviderImpl) widthProvider;
+                impl.preloadRowHeights(notebook.getId(), 100); // 预加载前100行的数据
             }
         });
         
-        rowHeadersRecycler.addOnScrollListener(new RecyclerView.OnScrollListener() {
-            @Override
-            public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
-                super.onScrolled(recyclerView, dx, dy);
-                dataRowsRecycler.scrollBy(0, dy);
-            }
-        });
-    }
-    
-    private void setupObservers() {
         // 观察列数据
         viewModel.getColumns().observe(this, columns -> {
             if (columns != null) {
@@ -390,9 +514,22 @@ public class NoteActivity extends AppCompatActivity {
             // 更新撤销按钮状态
         });
         
-        viewModel.getCanRedo().observe(this, canRedo -> {
-            // 更新重做按钮状态
+        // 观察视口状态变化 - 现在由ZoomableRecyclerHost处理
+        // ZoomableRecyclerHost会自动同步ViewModel的状态变化
+        
+        // 观察保存状态，实现自动保存功能
+        viewModel.getIsSaved().observe(this, isSaved -> {
+            if (isSaved != null && !isSaved) {
+                // 当有未保存的更改时，延迟自动保存
+                autoSaveHandler.removeCallbacks(autoSaveRunnable);
+                autoSaveRunnable = () -> {
+                    viewModel.saveNotebook();
+                    // 自动保存完成提示已删除
+                };
+                autoSaveHandler.postDelayed(autoSaveRunnable, 2000); // 2秒延迟自动保存
+            }
         });
+
     }
     
     private void updateCellsMap(List<Cell> cells) {
@@ -449,18 +586,15 @@ public class NoteActivity extends AppCompatActivity {
             viewModel.undo();
         });
         
-        // 重做按钮
-        findViewById(R.id.redo_button).setOnClickListener(v -> {
-            viewModel.redo();
-        });
+
     }
     
     private void handleIntent() {
         this.notebookId = getIntent().getLongExtra(EXTRA_NOTEBOOK_ID, -1);
         long templateId = getIntent().getLongExtra(EXTRA_TEMPLATE_ID, -1);
         String notebookName = getIntent().getStringExtra(EXTRA_NOTEBOOK_NAME);
-        int rows = getIntent().getIntExtra(EXTRA_ROWS, 10);
-        int cols = getIntent().getIntExtra(EXTRA_COLS, 5);
+        int rows = getIntent().getIntExtra(EXTRA_ROWS, 0);
+        int cols = getIntent().getIntExtra(EXTRA_COLS, 0);
         
         if (this.notebookId != -1) {
             // 加载现有笔记
@@ -488,9 +622,13 @@ public class NoteActivity extends AppCompatActivity {
             onBackPressed();
             return true;
         } else if (id == R.id.action_save) {
+            // 手动保存
             viewModel.saveNotebook();
-            // 显示保存成功提示
             Toast.makeText(this, "保存成功", Toast.LENGTH_SHORT).show();
+            return true;
+        } else if (id == R.id.action_settings) {
+            // TODO: 打开设置页面
+            Toast.makeText(this, "打开设置", Toast.LENGTH_SHORT).show();
             return true;
         }
         
@@ -566,4 +704,45 @@ public class NoteActivity extends AppCompatActivity {
       * 显示列头编辑对话框
       */
      // 列头编辑弹窗相关方法已删除
+     
+     /**
+      * 显示删除行确认对话框
+      */
+     private void showDeleteRowDialog(int rowIndex) {
+         new AlertDialog.Builder(this)
+                 .setTitle("删除行")
+                 .setMessage("确定要删除第 " + (rowIndex + 1) + " 行吗？此操作不可撤销。")
+                 .setPositiveButton("删除", (dialog, which) -> {
+                     if (viewModel != null) {
+                         viewModel.deleteRowAt(rowIndex);
+                         Toast.makeText(this, "已删除第 " + (rowIndex + 1) + " 行", Toast.LENGTH_SHORT).show();
+                     }
+                 })
+                 .setNegativeButton("取消", null)
+                 .show();
+     }
+     
+     /**
+      * 显示删除列确认对话框
+      */
+     private void showDeleteColumnDialog(int columnIndex) {
+        final String columnName;
+        if (columns != null && columnIndex < columns.size()) {
+            columnName = columns.get(columnIndex).getName();
+        } else {
+            columnName = "";
+        }
+         
+         new AlertDialog.Builder(this)
+                 .setTitle("删除列")
+                 .setMessage("确定要删除列 \"" + columnName + "\" 吗？此操作不可撤销。")
+                 .setPositiveButton("删除", (dialog, which) -> {
+                     if (viewModel != null) {
+                         viewModel.deleteColumnAt(columnIndex);
+                         Toast.makeText(this, "已删除列 \"" + columnName + "\"", Toast.LENGTH_SHORT).show();
+                     }
+                 })
+                 .setNegativeButton("取消", null)
+                 .show();
+     }
 }

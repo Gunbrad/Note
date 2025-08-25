@@ -14,7 +14,8 @@ import androidx.room.PrimaryKey;
     indices = {
         @Index(value = "created_at"),
         @Index(value = "updated_at"),
-        @Index(value = "is_deleted")
+        @Index(value = "is_deleted"),
+        @Index(value = "is_pinned")
     }
 )
 public class Notebook {
@@ -44,11 +45,18 @@ public class Notebook {
     @ColumnInfo(name = "deleted_at")
     private Long deletedAt;
     
+    @ColumnInfo(name = "is_pinned")
+    private boolean isPinned;
+    
+    @ColumnInfo(name = "pinned_at")
+    private Long pinnedAt;
+    
     // 构造函数
     public Notebook() {
         this.createdAt = System.currentTimeMillis();
         this.updatedAt = this.createdAt;
         this.isDeleted = false;
+        this.isPinned = false;
     }
     
     public Notebook(String title, String color) {
@@ -131,6 +139,28 @@ public class Notebook {
         this.deletedAt = deletedAt;
     }
     
+    public boolean isPinned() {
+        return isPinned;
+    }
+    
+    public void setPinned(boolean pinned) {
+        isPinned = pinned;
+        if (pinned) {
+            this.pinnedAt = System.currentTimeMillis();
+        } else {
+            this.pinnedAt = null;
+        }
+        // 注意：置顶操作不应该修改updatedAt，updatedAt只反映内容编辑时间
+    }
+    
+    public Long getPinnedAt() {
+        return pinnedAt;
+    }
+    
+    public void setPinnedAt(Long pinnedAt) {
+        this.pinnedAt = pinnedAt;
+    }
+    
     /**
      * 软删除
      */
@@ -143,6 +173,20 @@ public class Notebook {
      */
     public void restore() {
         setDeleted(false);
+    }
+    
+    /**
+     * 置顶
+     */
+    public void pin() {
+        setPinned(true);
+    }
+    
+    /**
+     * 取消置顶
+     */
+    public void unpin() {
+        setPinned(false);
     }
     
     /**
@@ -162,6 +206,8 @@ public class Notebook {
                 ", updatedAt=" + updatedAt +
                 ", isDeleted=" + isDeleted +
                 ", deletedAt=" + deletedAt +
+                ", isPinned=" + isPinned +
+                ", pinnedAt=" + pinnedAt +
                 '}';
     }
 }

@@ -4,32 +4,61 @@ plugins {
 
 android {
     namespace = "com.example.note"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.note"
-        minSdk = 33
-        targetSdk = 35
+        minSdk = 26                // 支持 Android 8.0+
+        targetSdk = 36             // 目标设为 Android 16
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("C:\\Users\\12732\\AndroidStudioProjects\\key\\gunbrad")
+            storePassword = "2njx2sm."
+            keyAlias = "key0"
+            keyPassword = "2njx2sm."
+        }
+    }
+
+                            
+                        
+
+
     buildTypes {
         release {
+            isMinifyEnabled = true     // 启用代码混淆和优化
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            signingConfig = signingConfigs.getByName("release")
+            
+            // 数据安全标签
+            manifestPlaceholders["data_collection"] = "false"
+            manifestPlaceholders["data_sharing"] = "false"
+            manifestPlaceholders["data_security"] = "true"
+        }
+        debug {
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
+
+                            
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
         isCoreLibraryDesugaringEnabled = true
     }
+    
 }
 
 dependencies {
@@ -40,6 +69,7 @@ dependencies {
     implementation(libs.constraintlayout)
     implementation(libs.recyclerview)
     implementation(libs.swiperefreshlayout)
+    implementation("androidx.cardview:cardview:1.0.0")
     
     // Architecture components
     implementation(libs.lifecycle.viewmodel)

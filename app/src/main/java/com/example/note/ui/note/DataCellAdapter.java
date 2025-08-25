@@ -25,6 +25,7 @@ import java.util.List;
 
 /**
  * 数据单元格适配器 - 支持内联编辑
+ * 使用ColumnWidthProvider提供基于缩放的动态尺寸
  */
 public class DataCellAdapter extends RecyclerView.Adapter<DataCellAdapter.DataCellViewHolder> {
     
@@ -33,6 +34,7 @@ public class DataCellAdapter extends RecyclerView.Adapter<DataCellAdapter.DataCe
     private int rowIndex;
     private int rowHeightDp = 44;
     private OnCellChangeListener listener;
+    private ColumnWidthProvider widthProvider;
     
     public interface OnCellChangeListener {
         void onCellClick(int rowIndex, int columnIndex);
@@ -42,6 +44,10 @@ public class DataCellAdapter extends RecyclerView.Adapter<DataCellAdapter.DataCe
     
     public void setOnCellChangeListener(OnCellChangeListener listener) {
         this.listener = listener;
+    }
+    
+    public void setColumnWidthProvider(ColumnWidthProvider widthProvider) {
+        this.widthProvider = widthProvider;
     }
     
     public void setRowData(int rowIndex, List<Cell> cells, List<Column> columns) {
@@ -69,10 +75,9 @@ public class DataCellAdapter extends RecyclerView.Adapter<DataCellAdapter.DataCe
     }
     
     public void setRowHeight(int heightDp) {
-        if (this.rowHeightDp != heightDp) {
-            this.rowHeightDp = heightDp;
-            notifyDataSetChanged();
-        }
+        // 不再设置全局rowHeightDp，行高现在由ColumnWidthProvider管理
+        // 只需要通知数据变化以刷新UI
+        notifyDataSetChanged();
     }
     
     @NonNull
@@ -97,7 +102,14 @@ public class DataCellAdapter extends RecyclerView.Adapter<DataCellAdapter.DataCe
         return Math.min(cells.size(), columns.size());
     }
     
-    class DataCellViewHolder extends RecyclerView.ViewHolder {
+    @Override
+    public void onViewRecycled(@NonNull DataCellViewHolder holder) {
+        super.onViewRecycled(holder);
+        // 强制结束编辑状态，防止回收时状态污染
+        holder.forceFinishEditing();
+    }
+    
+    class DataCellViewHolder extends RecyclerView.ViewHolder implements EditingStateHolder.EditingCell {
         private EditText editText;
         private int currentRowIndex;
         private int currentColumnIndex;
@@ -129,6 +141,14 @@ public class DataCellAdapter extends RecyclerView.Adapter<DataCellAdapter.DataCe
         }
         
         private void setupEditText() {
+            // 多指触控保护：吞掉多指事件，避免同时触发多个点击/焦点
+            editText.setOnTouchListener((v, event) -> {
+                if (event.getPointerCount() > 1) {
+                    return true; // 消费多指事件
+                }
+                return false; // 允许单指事件继续传递
+            });
+            
             // 点击开始编辑
             editText.setOnClickListener(v -> startEditing());
             
@@ -172,9 +192,14 @@ public class DataCellAdapter extends RecyclerView.Adapter<DataCellAdapter.DataCe
         private void startEditing() {
             if (!isEditing) {
                 isEditing = true;
+                // 使用新的beginEditing API
+                EditingStateHolder.beginEditing(this);
+                
+                // 显式设置UI状态
                 editText.setEnabled(true);
                 editText.setFocusable(true);
                 editText.setFocusableInTouchMode(true);
+                editText.setCursorVisible(true);
                 editText.requestFocus();
                 editText.setSelection(editText.getText().length());
                 
@@ -192,6 +217,14 @@ public class DataCellAdapter extends RecyclerView.Adapter<DataCellAdapter.DataCe
         private void finishEditing() {
             if (isEditing) {
                 isEditing = false;
+                // 使用新的endEditing API
+                EditingStateHolder.endEditing(this);
+                
+                // 重置UI状态，但保持可点击以便重新编辑
+                editText.setCursorVisible(false);
+                editText.setFocusable(true); // 保持可获得焦点
+                editText.setFocusableInTouchMode(true); // 保持触摸模式下可获得焦点
+                editText.setEnabled(true); // 保持启用状态
                 editText.clearFocus();
                 
                 // 隐藏软键盘
@@ -203,20 +236,63 @@ public class DataCellAdapter extends RecyclerView.Adapter<DataCellAdapter.DataCe
             }
         }
         
+        @Override
+        public void forceFinishEditing() {
+            finishEditing();
+        }
+        
+        @Override
+        public String getCellIdentifier() {
+            return currentRowIndex + "_" + currentColumnIndex;
+        }
+        
         public void bind(Cell cell, Column column, int columnIndex) {
             this.currentRowIndex = rowIndex;
             this.currentColumnIndex = columnIndex;
             
-            // 设置内容时避免触发TextWatcher
+            // 设置内容时避免触发TextWatcher，并且只在内容真正改变时才更新
             String content = cell.getContent() != null ? cell.getContent() : "";
-            isUpdatingText = true;
-            editText.setText(content);
-            isUpdatingText = false;
+            String currentText = editText.getText().toString();
             
-            // 设置尺寸
+            // 只有在内容真正改变且不在编辑状态时才更新文本，避免光标跳转
+            if (!content.equals(currentText) && !isEditing) {
+                isUpdatingText = true;
+                editText.setText(content);
+                isUpdatingText = false;
+            }
+            
+            // 检查是否为当前编辑单元格，确保回收复用时状态正确
+            boolean shouldBeEditing = EditingStateHolder.isCurrentEditingCell(this);
+            if (shouldBeEditing && !isEditing) {
+                // 如果应该编辑但当前不是编辑状态，开始编辑
+                startEditing();
+            } else if (!shouldBeEditing && isEditing) {
+                // 如果不应该编辑但当前是编辑状态，结束编辑
+                finishEditing();
+            } else if (!shouldBeEditing) {
+                // 确保非编辑单元格的UI状态正确（防止回收复用带来的状态污染）
+                editText.setCursorVisible(false);
+                editText.setFocusable(true); // 保持可获得焦点以响应点击
+                editText.setFocusableInTouchMode(true); // 保持触摸模式下可获得焦点
+                editText.setEnabled(true); // 保持可用以响应点击
+                editText.clearFocus();
+                isEditing = false;
+            }
+            
+            // 使用ColumnWidthProvider获取effective尺寸
             ViewGroup.LayoutParams layoutParams = itemView.getLayoutParams();
-            layoutParams.width = (int) (column.getWidth() * itemView.getContext().getResources().getDisplayMetrics().density);
-            layoutParams.height = (int) (rowHeightDp * itemView.getContext().getResources().getDisplayMetrics().density);
+            if (widthProvider != null) {
+                layoutParams.width = widthProvider.getColumnWidthPx(columnIndex);
+                // 使用行索引获取该行的具体高度
+                layoutParams.height = widthProvider.getRowHeightPx(currentRowIndex);
+                
+                // 设置文本大小
+                editText.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, widthProvider.getTextSizePx());
+            } else {
+                // 回退到原始方式
+                layoutParams.width = (int) (column.getWidth() * itemView.getContext().getResources().getDisplayMetrics().density);
+                layoutParams.height = (int) (rowHeightDp * itemView.getContext().getResources().getDisplayMetrics().density);
+            }
             itemView.setLayoutParams(layoutParams);
             
             // 设置长按监听器

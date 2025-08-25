@@ -1,6 +1,8 @@
 package com.example.note.data.database;
 
 import android.content.Context;
+import android.database.Cursor;
+import android.util.Log;
 
 import androidx.room.Database;
 import androidx.room.Room;
@@ -11,10 +13,12 @@ import androidx.sqlite.db.SupportSQLiteDatabase;
 import com.example.note.data.dao.CellDao;
 import com.example.note.data.dao.ColumnDao;
 import com.example.note.data.dao.NotebookDao;
+import com.example.note.data.dao.RowDao;
 import com.example.note.data.dao.TemplateDao;
 import com.example.note.data.entity.Cell;
 import com.example.note.data.entity.Column;
 import com.example.note.data.entity.Notebook;
+import com.example.note.data.entity.Row;
 import com.example.note.data.entity.Template;
 
 /**
@@ -22,8 +26,8 @@ import com.example.note.data.entity.Template;
  * Room数据库的主要配置类
  */
 @Database(
-        entities = {Notebook.class, Column.class, Cell.class, Template.class},
-        version = 4,
+        entities = {Notebook.class, Column.class, Cell.class, Template.class, Row.class},
+        version = 9,
         exportSchema = false
 )
 public abstract class AppDatabase extends RoomDatabase {
@@ -36,6 +40,7 @@ public abstract class AppDatabase extends RoomDatabase {
     public abstract CellDao cellDao();
     public abstract ColumnDao columnDao();
     public abstract TemplateDao templateDao();
+    public abstract RowDao rowDao();
     
     /**
      * 获取数据库实例（单例模式）
@@ -51,7 +56,7 @@ public abstract class AppDatabase extends RoomDatabase {
                     )
                     .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING) // 启用WAL模式
                     .addCallback(DATABASE_CALLBACK) // 添加数据库回调
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4) // 添加数据库迁移
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9) // 添加数据库迁移
                     .fallbackToDestructiveMigration() // 允许破坏性迁移
                     .build();
                 }
@@ -70,21 +75,19 @@ public abstract class AppDatabase extends RoomDatabase {
             super.onCreate(db);
             
             // 创建FTS虚拟表用于全文搜索
-            db.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS cells_fts USING fts4(content=cells, content_text)");
+            db.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS cells_fts USING fts4(content=cells, content)");
             
             // 创建触发器，自动更新FTS表
             db.execSQL("CREATE TRIGGER IF NOT EXISTS cells_fts_insert AFTER INSERT ON cells BEGIN " +
-                    "INSERT INTO cells_fts(docid, content_text) VALUES (new.id, new.content); END;");
+                    "INSERT INTO cells_fts(docid, content) VALUES (new.id, new.content); END;");
             
             db.execSQL("CREATE TRIGGER IF NOT EXISTS cells_fts_update AFTER UPDATE ON cells BEGIN " +
-                    "UPDATE cells_fts SET content_text = new.content WHERE docid = new.id; END;");
+                    "UPDATE cells_fts SET content = new.content WHERE docid = new.id; END;");
             
             db.execSQL("CREATE TRIGGER IF NOT EXISTS cells_fts_delete AFTER DELETE ON cells BEGIN " +
                     "DELETE FROM cells_fts WHERE docid = old.id; END;");
             
-            // 创建笔记本更新时间触发器
-            db.execSQL("CREATE TRIGGER IF NOT EXISTS update_notebook_time AFTER UPDATE ON cells BEGIN " +
-                    "UPDATE notebooks SET updated_at = " + System.currentTimeMillis() + " WHERE id = new.notebook_id; END;");
+
             
             // 插入系统预置模板
             insertSystemTemplates(db);
@@ -93,6 +96,15 @@ public abstract class AppDatabase extends RoomDatabase {
         @Override
         public void onOpen(SupportSQLiteDatabase db) {
             super.onOpen(db);
+            
+            // 记录SQLite版本，用于调试真机和虚拟机差异
+            try (Cursor cursor = db.query("SELECT sqlite_version()")) {
+                if (cursor.moveToFirst()) {
+                    Log.d("AppDatabase", "SQLite version: " + cursor.getString(0));
+                }
+            } catch (Exception e) {
+                Log.w("AppDatabase", "Failed to get SQLite version", e);
+            }
             
             // 启用外键约束
             db.execSQL("PRAGMA foreign_keys=ON");
@@ -218,4 +230,81 @@ public abstract class AppDatabase extends RoomDatabase {
             database.execSQL("CREATE UNIQUE INDEX index_columns_notebook_id_column_index ON columns(notebook_id, column_index)");
         }
     };
+
+    static final Migration MIGRATION_4_5 = new Migration(4, 5) {
+        @Override
+        public void migrate(SupportSQLiteDatabase database) {
+            // 添加isPinned和pinnedAt字段到notebooks表
+            database.execSQL("ALTER TABLE notebooks ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0");
+            database.execSQL("ALTER TABLE notebooks ADD COLUMN pinned_at INTEGER");
+            
+            // 创建is_pinned索引
+            database.execSQL("CREATE INDEX index_notebooks_is_pinned ON notebooks(is_pinned)");
+        }
+    };
+
+    static final Migration MIGRATION_5_6 = new Migration(5, 6) {
+        @Override
+        public void migrate(SupportSQLiteDatabase database) {
+            // 创建唯一索引以提升性能并保证逻辑唯一性
+            database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_cells_notebook_row_col ON cells(notebook_id, row_index, col_index)");
+        }
+    };
+
+    static final Migration MIGRATION_6_7 = new Migration(6, 7) {
+        @Override
+        public void migrate(SupportSQLiteDatabase database) {
+            // 版本7：修复FTS表字段名问题
+            // 删除旧的FTS表和触发器
+            database.execSQL("DROP TRIGGER IF EXISTS cells_fts_insert");
+            database.execSQL("DROP TRIGGER IF EXISTS cells_fts_update");
+            database.execSQL("DROP TRIGGER IF EXISTS cells_fts_delete");
+            database.execSQL("DROP TABLE IF EXISTS cells_fts");
+            
+            // 重新创建FTS表，使用正确的字段名
+            database.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS cells_fts USING fts4(content=cells, content)");
+            
+            // 重新创建触发器
+            database.execSQL("CREATE TRIGGER IF NOT EXISTS cells_fts_insert AFTER INSERT ON cells BEGIN " +
+                    "INSERT INTO cells_fts(docid, content) VALUES (new.id, new.content); END;");
+            
+            database.execSQL("CREATE TRIGGER IF NOT EXISTS cells_fts_update AFTER UPDATE ON cells BEGIN " +
+                    "UPDATE cells_fts SET content = new.content WHERE docid = new.id; END;");
+            
+            database.execSQL("CREATE TRIGGER IF NOT EXISTS cells_fts_delete AFTER DELETE ON cells BEGIN " +
+                    "DELETE FROM cells_fts WHERE docid = old.id; END;");
+            
+            // 重新填充FTS表数据
+            database.execSQL("INSERT INTO cells_fts(docid, content) SELECT id, content FROM cells WHERE content IS NOT NULL AND content != ''");
+        }
+    };
+
+    static final Migration MIGRATION_7_8 = new Migration(7, 8) {
+        @Override
+        public void migrate(SupportSQLiteDatabase database) {
+            // 版本8：添加rows表用于存储行高信息
+            database.execSQL("CREATE TABLE IF NOT EXISTS rows (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "notebook_id INTEGER NOT NULL, " +
+                    "row_index INTEGER NOT NULL, " +
+                    "height_dp REAL NOT NULL DEFAULT 44.0, " +
+                    "created_at INTEGER NOT NULL, " +
+                    "updated_at INTEGER NOT NULL, " +
+                    "FOREIGN KEY(notebook_id) REFERENCES notebooks(id) ON DELETE CASCADE)");
+            
+            // 创建索引
+            database.execSQL("CREATE INDEX IF NOT EXISTS index_rows_notebook_id ON rows(notebook_id)");
+            database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_rows_notebook_id_row_index ON rows(notebook_id, row_index)");
+        }
+    };
+
+    static final Migration MIGRATION_8_9 = new Migration(8, 9) {
+        @Override
+        public void migrate(SupportSQLiteDatabase database) {
+            // 版本9：行高持久化功能完善，无需额外的schema变更
+            // 此迁移主要用于版本号更新，确保数据完整性
+        }
+    };
+
+
 }

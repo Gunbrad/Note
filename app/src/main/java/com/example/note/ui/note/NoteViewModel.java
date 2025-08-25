@@ -1,6 +1,8 @@
 package com.example.note.ui.note;
 
 import android.app.Application;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -73,21 +75,22 @@ public class NoteViewModel extends AndroidViewModel {
     private List<Cell> sourceFrozenCells = new ArrayList<>();
     private List<Cell> sourceScrollableCells = new ArrayList<>();
     
-    // 撤销重做功能
+    // 撤销重做相关
     private final Stack<TableOperation> undoStack = new Stack<>();
-    private final Stack<TableOperation> redoStack = new Stack<>();
     private final MutableLiveData<Boolean> _canUndo = new MutableLiveData<>(false);
     public final LiveData<Boolean> canUndo = _canUndo;
-    private final MutableLiveData<Boolean> _canRedo = new MutableLiveData<>(false);
-    public final LiveData<Boolean> canRedo = _canRedo;
+    
+    // 延迟保存相关
+    private final Handler delayedSaveHandler = new Handler(Looper.getMainLooper());
+    private Runnable delayedSaveRunnable;
+    
+
     
     public LiveData<Boolean> getCanUndo() {
         return _canUndo;
     }
     
-    public LiveData<Boolean> getCanRedo() {
-        return _canRedo;
-    }
+
     public final LiveData<List<Cell>> frozenColumnCells = _frozenColumnCells;
     
     private final MutableLiveData<List<Cell>> _scrollableColumnsCells = new MutableLiveData<>(new ArrayList<>());
@@ -95,6 +98,16 @@ public class NoteViewModel extends AndroidViewModel {
     
     private final MutableLiveData<Integer> _rowCount = new MutableLiveData<>(0);
     public final LiveData<Integer> rowCount = _rowCount;
+    
+    // 视口状态管理
+    private final MutableLiveData<Float> _scale = new MutableLiveData<>(1.0f);
+    public final LiveData<Float> scale = _scale;
+    
+    private final MutableLiveData<Float> _offsetX = new MutableLiveData<>(0f);
+    public final LiveData<Float> offsetX = _offsetX;
+    
+    private final MutableLiveData<Float> _offsetY = new MutableLiveData<>(0f);
+    public final LiveData<Float> offsetY = _offsetY;
     
     private final MutableLiveData<Integer> _columnCount = new MutableLiveData<>(0);
     public final LiveData<Integer> columnCount = _columnCount;
@@ -105,6 +118,36 @@ public class NoteViewModel extends AndroidViewModel {
     
     // 当前可见的"原始行索引"；null 代表未筛选（全部可见）
     private List<Integer> activeVisibleRows = null;
+    
+    /**
+     * 判断指定列索引是否为冻结列
+     * @param colIndex 列索引
+     * @return 如果是冻结列返回true，否则返回false
+     */
+    private boolean isFrozenColumnIndex(int colIndex) {
+        List<Column> currentColumns = _columns.getValue();
+        if (currentColumns != null && colIndex >= 0 && colIndex < currentColumns.size()) {
+            return currentColumns.get(colIndex).isFrozen();
+        }
+        // 如果列信息不可用，默认不冻结
+        return false;
+    }
+    
+    /**
+     * 获取第一个冻结列的索引
+     * @return 第一个冻结列的索引，如果没有冻结列则返回-1
+     */
+    private int getFirstFrozenColumnIndex() {
+        List<Column> currentColumns = _columns.getValue();
+        if (currentColumns != null) {
+            for (int i = 0; i < currentColumns.size(); i++) {
+                if (currentColumns.get(i).isFrozen()) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
     
     public NoteViewModel(@NonNull Application application) {
         super(application);
@@ -135,6 +178,8 @@ public class NoteViewModel extends AndroidViewModel {
         return isSaved;
     }
     
+    // 视口状态管理方法已在其他位置定义
+    
     /**
      * 创建空白笔记
      */
@@ -153,8 +198,10 @@ public class NoteViewModel extends AndroidViewModel {
                 notebook.setColor(ColorUtils.getDefaultNotebookColor());
                 _currentNotebook.postValue(notebook);
                 
-                Log.d(TAG, "Blank notebook created with ID: " + notebookId);
-                // 不需要重新加载，因为表格数据已经在initializeTableData中初始化了
+                // 初始化空表格数据
+                initializeEmptyTableData();
+                
+                Log.d(TAG, "Blank notebook created with ID: " + notebookId + ", rows: " + rows + ", cols: " + cols);
             }
             
             @Override
@@ -164,6 +211,27 @@ public class NoteViewModel extends AndroidViewModel {
                 Log.e(TAG, "Failed to create blank notebook", error);
             }
         });
+    }
+    
+    /**
+     * 初始化空表格数据
+     */
+    private void initializeEmptyTableData() {
+        // 初始化空的列列表
+        _columns.postValue(new ArrayList<>());
+        
+        // 初始化空的单元格列表
+        _frozenColumnCells.postValue(new ArrayList<>());
+        _scrollableColumnsCells.postValue(new ArrayList<>());
+        
+        // 设置行数为0
+        _rowCount.postValue(0);
+        
+        // 清空源数据缓存
+        sourceFrozenCells.clear();
+        sourceScrollableCells.clear();
+        
+        Log.d(TAG, "Empty table data initialized");
     }
     
     /**
@@ -296,7 +364,7 @@ public class NoteViewModel extends AndroidViewModel {
                     maxRow = Math.max(maxRow, cell.getRowIndex());
                     maxCol = Math.max(maxCol, cell.getColIndex());
                     
-                    if (cell.getColIndex() == 0) {
+                    if (isFrozenColumnIndex(cell.getColIndex())) {
                         frozenCells.add(cell);
                     } else {
                         scrollableCells.add(cell);
@@ -421,28 +489,34 @@ public class NoteViewModel extends AndroidViewModel {
     private void saveCellsData(long notebookId) {
         List<Cell> allCells = new ArrayList<>();
         
-        // 收集冻结列单元格
-        List<Cell> frozenCells = _frozenColumnCells.getValue();
-        if (frozenCells != null) {
-            for (Cell cell : frozenCells) {
-                cell.setNotebookId(notebookId);
-                allCells.add(cell);
+        // 从源数据缓存收集冻结列单元格（避免使用显示数据）
+        if (sourceFrozenCells != null) {
+            for (Cell cell : sourceFrozenCells) {
+                // 创建Cell的副本，避免修改原始对象
+                Cell cellCopy = createCellCopy(cell);
+                cellCopy.setNotebookId(notebookId);
+                cellCopy.setId(0); // 清零id，避免主键冲突，让Room走自增主键
+                allCells.add(cellCopy);
             }
         }
         
-        // 收集可滚动列单元格
-        List<Cell> scrollableCells = _scrollableColumnsCells.getValue();
-        if (scrollableCells != null) {
-            for (Cell cell : scrollableCells) {
-                cell.setNotebookId(notebookId);
-                allCells.add(cell);
+        // 从源数据缓存收集可滚动列单元格（避免使用显示数据）
+        if (sourceScrollableCells != null) {
+            for (Cell cell : sourceScrollableCells) {
+                // 创建Cell的副本，避免修改原始对象
+                Cell cellCopy = createCellCopy(cell);
+                cellCopy.setNotebookId(notebookId);
+                cellCopy.setId(0); // 清零id，避免主键冲突，让Room走自增主键
+                allCells.add(cellCopy);
             }
         }
         
         if (!allCells.isEmpty()) {
-            cellRepository.saveCells(allCells, new CellRepository.RepositoryCallback<Void>() {
+            cellRepository.replaceAllCells(notebookId, allCells, new CellRepository.RepositoryCallback<Void>() {
                 @Override
                 public void onSuccess(Void result) {
+                    // 更新笔记本的updatedAt时间戳
+                    notebookRepository.touchNotebook(notebookId);
                     _isLoading.postValue(false);
                     _isSaved.postValue(true);
                     Log.d(TAG, "Notebook saved successfully: " + allCells.size() + " cells");
@@ -456,6 +530,8 @@ public class NoteViewModel extends AndroidViewModel {
                 }
             });
         } else {
+            // 即使没有单元格数据也要更新笔记本的updatedAt时间戳
+            notebookRepository.touchNotebook(notebookId);
             _isLoading.postValue(false);
             _isSaved.postValue(true);
             Log.d(TAG, "Notebook saved: no cells to save");
@@ -521,6 +597,23 @@ public class NoteViewModel extends AndroidViewModel {
         _isSaved.postValue(true);
     }
     
+    /**
+     * 触发延迟保存
+     */
+    private void triggerDelayedSave() {
+        // 取消之前的延迟保存任务
+        delayedSaveHandler.removeCallbacks(delayedSaveRunnable);
+        
+        // 创建新的延迟保存任务
+        delayedSaveRunnable = () -> {
+            saveNotebook();
+            Log.d(TAG, "Delayed save triggered after adding row/column");
+        };
+        
+        // 延迟500ms执行保存
+        delayedSaveHandler.postDelayed(delayedSaveRunnable, 500);
+    }
+    
     // DataGrip风格表格相关方法
     
     /**
@@ -536,19 +629,22 @@ public class NoteViewModel extends AndroidViewModel {
             column.setWidth(150); // 使用新的默认宽度
             column.setType("TEXT");
             column.setVisible(true);
-            column.setFrozen(i == 0); // 第一列冻结
+            column.setFrozen(false); // 默认不设置冻结列
             columnList.add(column);
         }
         _columns.postValue(columnList);
         
         // 创建冻结列单元格数据
         List<Cell> frozenCells = new ArrayList<>();
-        for (int row = 0; row < rows; row++) {
-            Cell cell = new Cell();
-            cell.setRowIndex(row);
-            cell.setColIndex(0);
-            cell.setContent("");
-            frozenCells.add(cell);
+        int firstFrozenColIndex = getFirstFrozenColumnIndex();
+        if (firstFrozenColIndex >= 0) {
+            for (int row = 0; row < rows; row++) {
+                Cell cell = new Cell();
+                cell.setRowIndex(row);
+                cell.setColIndex(firstFrozenColIndex);
+                cell.setContent("");
+                frozenCells.add(cell);
+            }
         }
         _frozenColumnCells.postValue(frozenCells);
         
@@ -841,11 +937,8 @@ public class NoteViewModel extends AndroidViewModel {
         copy.setTextAlignment(original.getTextAlignment());
         copy.setImageId(original.getImageId());
         
-        // 设置稳定ID：使用原始行键和列索引组合
-        // 格式："rowKey_colIndex"，确保DiffUtil能正确识别整行移动
-        int originalRowKey = original.getRowIndex();
-        long stableId = ((long) originalRowKey << 16) | (original.getColIndex() & 0xFFFF);
-        copy.setId(stableId);
+        // 不设置稳定ID，避免UI稳定ID污染数据库
+        // RecyclerView的稳定ID由Adapter的getItemId()方法提供
         
         // 注意：不复制createdAt、updatedAt等数据库字段
         return copy;
@@ -872,9 +965,8 @@ public class NoteViewModel extends AndroidViewModel {
         copy.setTextAlignment(original.getTextAlignment());
         copy.setImageId(original.getImageId());
         
-        // 使用传入的原始行键生成稳定ID
-        long stableId = ((long) rowKey << 16) | (original.getColIndex() & 0xFFFF);
-        copy.setId(stableId);
+        // 不设置稳定ID，避免UI稳定ID污染数据库
+        // RecyclerView的稳定ID由Adapter的getItemId()方法提供
         
         return copy;
     }
@@ -1035,7 +1127,7 @@ public class NoteViewModel extends AndroidViewModel {
                 for (int c = 0; c < cols; c++) {
                     if (c < oldRowCells.size()) {
                         Cell copied = createDisplayCopy(oldRowCells.get(c), newRow, rowKey);
-                        if (c == 0) {
+                        if (isFrozenColumnIndex(c)) {
                             newFrozen.add(copied);
                         } else {
                             newScrollable.add(copied);
@@ -1092,9 +1184,51 @@ public class NoteViewModel extends AndroidViewModel {
             originalRow = row;
         }
         
-        // 更新内存中的数据（不触发LiveData更新，避免干扰编辑）
+        // 获取旧值用于撤销重做
+        String oldValue = "";
         Cell targetCell = null;
-        if (col == 0) {
+        
+        // 先获取当前值作为旧值（使用显示行号查找显示数据）
+        if (isFrozenColumnIndex(col)) {
+            List<Cell> frozenCells = _frozenColumnCells.getValue();
+            if (frozenCells != null) {
+                for (Cell cell : frozenCells) {
+                    if (cell.getRowIndex() == row && cell.getColIndex() == col) {
+                        oldValue = cell.getContent() != null ? cell.getContent() : "";
+                        targetCell = cell;
+                        break;
+                    }
+                }
+            }
+        } else {
+            List<Cell> scrollableCells = _scrollableColumnsCells.getValue();
+            if (scrollableCells != null) {
+                for (Cell cell : scrollableCells) {
+                    if (cell.getRowIndex() == row && cell.getColIndex() == col) {
+                        oldValue = cell.getContent() != null ? cell.getContent() : "";
+                        targetCell = cell;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // 如果值没有变化，不需要记录操作
+        if (oldValue.equals(value)) {
+            return;
+        }
+        
+        // 记录撤销重做操作（使用 row*1000 + col 编码位置）
+        TableOperation operation = new TableOperation(
+            TableOperation.OperationType.UPDATE_CELL,
+            row * 1000 + col,
+            oldValue,
+            value
+        );
+        addToUndoStack(operation);
+        
+        // 更新内存中的数据（不触发LiveData更新，避免干扰编辑）
+        if (isFrozenColumnIndex(col)) {
             // 更新冻结列（使用显示行号查找显示数据）
             List<Cell> frozenCells = _frozenColumnCells.getValue();
             if (frozenCells != null) {
@@ -1119,7 +1253,7 @@ public class NoteViewModel extends AndroidViewModel {
                 }
             }
         } else {
-            // 更新可滚动列
+            // 更新可滚动列（使用显示行号查找显示数据）
             List<Cell> scrollableCells = _scrollableColumnsCells.getValue();
             if (scrollableCells != null) {
                 for (Cell cell : scrollableCells) {
@@ -1145,21 +1279,25 @@ public class NoteViewModel extends AndroidViewModel {
         }
         
         // 立即保存到数据库（编辑即保存，使用原始行号）
+        // 无论是否找到targetCell，都进行数据库更新（关键修复点）
         if (targetCell != null) {
             targetCell.setNotebookId(currentNotebook.getId());
-            cellRepository.updateCellContent(currentNotebook.getId(), originalRow, col, value, new CellRepository.RepositoryCallback<Void>() {
-                @Override
-                public void onSuccess(Void result) {
-                    Log.d(TAG, "Cell saved: (" + originalRow + ", " + col + ") = " + value);
-                }
-                
-                @Override
-                public void onError(Exception e) {
-                    Log.e(TAG, "Failed to save cell: (" + originalRow + ", " + col + ")", e);
-                    _errorMessage.postValue("保存失败: " + e.getMessage());
-                }
-            });
         }
+        // 数据库中存储的是原始行号，所以必须使用originalRow
+        cellRepository.updateCellContent(currentNotebook.getId(), originalRow, col, value, new CellRepository.RepositoryCallback<Void>() {
+            @Override
+            public void onSuccess(Void result) {
+                // 更新笔记本的updatedAt时间戳
+                notebookRepository.touchNotebook(currentNotebook.getId());
+                Log.d(TAG, "Cell saved: (" + originalRow + ", " + col + ") = " + value);
+            }
+            
+            @Override
+            public void onError(Exception e) {
+                Log.e(TAG, "Failed to save cell: (" + originalRow + ", " + col + ")", e);
+                _errorMessage.postValue("保存失败: " + e.getMessage());
+            }
+        });
         
         markAsModified();
     }
@@ -1209,6 +1347,9 @@ public class NoteViewModel extends AndroidViewModel {
             
             _columnCount.postValue(newColIndex + 1);
             markAsModified();
+            
+            // 立即触发保存（延迟500ms避免频繁保存）
+            triggerDelayedSave();
         }
     }
     
@@ -1222,25 +1363,38 @@ public class NoteViewModel extends AndroidViewModel {
         if (currentRows != null && currentCols != null) {
             int newRowIndex = currentRows;
             
-            // 为冻结列添加新行
-            List<Cell> frozenCells = _frozenColumnCells.getValue();
-            if (frozenCells != null) {
-                Cell newFrozenCell = new Cell();
-                newFrozenCell.setRowIndex(newRowIndex);
-                newFrozenCell.setColIndex(0);
-                newFrozenCell.setContent("");
-                frozenCells.add(newFrozenCell);
-                _frozenColumnCells.postValue(frozenCells);
-                
-                // 同步维护源数据缓存
-                Cell sourceFrozenCell = createCellCopy(newFrozenCell);
-                sourceFrozenCells.add(sourceFrozenCell);
+            // 记录撤销重做操作
+            TableOperation operation = new TableOperation(
+                TableOperation.OperationType.ADD_ROW,
+                newRowIndex,
+                null,
+                null
+            );
+            addToUndoStack(operation);
+            
+            // 为冻结列添加新行（只有真正存在冻结列时才操作）
+            int firstFrozenColIndex = getFirstFrozenColumnIndex();
+            if (firstFrozenColIndex >= 0) {
+                List<Cell> frozenCells = _frozenColumnCells.getValue();
+                if (frozenCells != null) {
+                    Cell newFrozenCell = new Cell();
+                    newFrozenCell.setRowIndex(newRowIndex);
+                    newFrozenCell.setColIndex(firstFrozenColIndex);
+                    newFrozenCell.setContent("");
+                    frozenCells.add(newFrozenCell);
+                    _frozenColumnCells.postValue(frozenCells);
+                    
+                    // 同步维护源数据缓存
+                    Cell sourceFrozenCell = createCellCopy(newFrozenCell);
+                    sourceFrozenCells.add(sourceFrozenCell);
+                }
             }
             
-            // 为可滚动列添加新行
+            // 为可滚动列添加新行（遍历所有列并跳过冻结列）
             List<Cell> scrollableCells = _scrollableColumnsCells.getValue();
             if (scrollableCells != null) {
-                for (int col = 1; col < currentCols; col++) {
+                for (int col = 0; col < currentCols; col++) {
+                    if (isFrozenColumnIndex(col)) continue; // 跳过冻结列
                     Cell newCell = new Cell();
                     newCell.setRowIndex(newRowIndex);
                     newCell.setColIndex(col);
@@ -1260,6 +1414,9 @@ public class NoteViewModel extends AndroidViewModel {
             insertKey(newRowIndex);
             
             markAsModified();
+            
+            // 立即触发保存（延迟500ms避免频繁保存）
+            triggerDelayedSave();
         }
     }
     
@@ -1270,7 +1427,8 @@ public class NoteViewModel extends AndroidViewModel {
         List<Column> currentColumns = _columns.getValue();
         if (currentColumns != null) {
             for (int i = 0; i < currentColumns.size(); i++) {
-                if (currentColumns.get(i).getId() == column.getId()) {
+                // 修复：使用columnIndex而不是id来匹配列，避免新建笔记时所有列id都为0的问题
+                if (currentColumns.get(i).getColumnIndex() == column.getColumnIndex()) {
                     currentColumns.set(i, column);
                     break;
                 }
@@ -1278,33 +1436,56 @@ public class NoteViewModel extends AndroidViewModel {
             _columns.postValue(currentColumns);
             markAsModified();
             
-            // 保存到数据库 - 更新列名
-            columnRepository.updateColumnName(column.getId(), column.getName(), new ColumnRepository.RepositoryCallback<Void>() {
-                @Override
-                public void onSuccess(Void result) {
-                    Log.d(TAG, "Column name updated successfully: " + column.getName());
+            // 检查列是否已经保存到数据库（ID为0表示未保存）
+            if (column.getId() == 0) {
+                // 新建笔记时列还没有ID，需要先保存整个列数据以获得ID
+                Notebook notebook = _currentNotebook.getValue();
+                if (notebook != null) {
+                    column.setNotebookId(notebook.getId());
+                    columnRepository.saveColumn(column, new ColumnRepository.RepositoryCallback<Long>() {
+                        @Override
+                        public void onSuccess(Long id) {
+                            column.setId(id);
+                            Log.d(TAG, "Column saved with new ID: " + id + ", name: " + column.getName());
+                        }
+                        
+                        @Override
+                        public void onError(Exception e) {
+                            Log.e(TAG, "Failed to save new column", e);
+                            _errorMessage.postValue("保存列数据失败: " + e.getMessage());
+                        }
+                    });
                 }
+            } else {
+                // 列已经有ID，可以直接更新
+                // 保存到数据库 - 更新列名
+                columnRepository.updateColumnName(column.getId(), column.getName(), new ColumnRepository.RepositoryCallback<Void>() {
+                    @Override
+                    public void onSuccess(Void result) {
+                        Log.d(TAG, "Column name updated successfully: " + column.getName());
+                    }
+                    
+                    @Override
+                    public void onError(Exception e) {
+                        Log.e(TAG, "Failed to update column name", e);
+                        _errorMessage.postValue("更新列名失败: " + e.getMessage());
+                    }
+                });
                 
-                @Override
-                public void onError(Exception e) {
-                    Log.e(TAG, "Failed to update column name", e);
-                    _errorMessage.postValue("更新列名失败: " + e.getMessage());
-                }
-            });
-            
-            // 保存到数据库 - 更新列宽
-            columnRepository.updateColumnWidth(column.getId(), column.getWidth(), new ColumnRepository.RepositoryCallback<Void>() {
-                @Override
-                public void onSuccess(Void result) {
-                    Log.d(TAG, "Column width updated successfully: " + column.getWidth());
-                }
-                
-                @Override
-                public void onError(Exception e) {
-                    Log.e(TAG, "Failed to update column width", e);
-                    _errorMessage.postValue("更新列宽失败: " + e.getMessage());
-                }
-            });
+                // 保存到数据库 - 更新列宽
+                columnRepository.updateColumnWidth(column.getId(), column.getWidth(), new ColumnRepository.RepositoryCallback<Void>() {
+                    @Override
+                    public void onSuccess(Void result) {
+                        Log.d(TAG, "Column width updated successfully: " + column.getWidth());
+                    }
+                    
+                    @Override
+                    public void onError(Exception e) {
+                        Log.e(TAG, "Failed to update column width", e);
+                        _errorMessage.postValue("更新列宽失败: " + e.getMessage());
+                    }
+                });
+            }
         }
     }
     
@@ -1340,7 +1521,7 @@ public class NoteViewModel extends AndroidViewModel {
                 
                 // 删除对应的单元格数据
                 int colIndex = columnToDelete.getColumnIndex();
-                if (colIndex == 0) {
+                if (isFrozenColumnIndex(colIndex)) {
                     // 如果删除的是冻结列，清空冻结列数据
                     _frozenColumnCells.postValue(new ArrayList<>());
                 } else {
@@ -1387,7 +1568,8 @@ public class NoteViewModel extends AndroidViewModel {
                 // 插入新的冻结列单元格
                 Cell newFrozenCell = new Cell();
                 newFrozenCell.setRowIndex(position);
-                newFrozenCell.setColIndex(0);
+                int firstFrozenColIndex = getFirstFrozenColumnIndex();
+                newFrozenCell.setColIndex(firstFrozenColIndex >= 0 ? firstFrozenColIndex : 0);
                 newFrozenCell.setContent("行" + position);
                 frozenCells.add(position, newFrozenCell);
                 _frozenColumnCells.postValue(frozenCells);
@@ -1531,6 +1713,19 @@ public class NoteViewModel extends AndroidViewModel {
         Integer currentCols = _columnCount.getValue();
         
         if (currentRows != null && currentCols != null && position >= 0 && position < currentRows && currentRows > 1) {
+            // 快照要删除的行数据用于撤销
+            List<Cell> rowSnapshot = snapshotRow(position, currentCols);
+            
+            // 记录撤销重做操作
+            TableOperation operation = new TableOperation(
+                TableOperation.OperationType.DELETE_ROW,
+                position,
+                null,
+                null
+            );
+            operation.setAffectedCells(rowSnapshot);
+            addToUndoStack(operation);
+            
             // 删除冻结列中的行
             List<Cell> frozenCells = _frozenColumnCells.getValue();
             if (frozenCells != null) {
@@ -1593,6 +1788,27 @@ public class NoteViewModel extends AndroidViewModel {
         Integer currentRows = _rowCount.getValue();
         
         if (currentColumns != null && currentRows != null && position >= 0 && position < currentColumns.size() && currentColumns.size() > 1) {
+            // 快照要删除的列数据用于撤销
+            List<Cell> columnSnapshot = snapshotColumn(position, currentRows);
+            Column deletedColumn = null;
+            for (Column column : currentColumns) {
+                if (column.getColumnIndex() == position) {
+                    deletedColumn = new Column(column); // 创建副本
+                    break;
+                }
+            }
+            
+            // 记录撤销重做操作
+            TableOperation operation = new TableOperation(
+                TableOperation.OperationType.DELETE_COLUMN,
+                position,
+                null,
+                null
+            );
+            operation.setAffectedCells(columnSnapshot);
+            operation.setAffectedColumn(deletedColumn);
+            addToUndoStack(operation);
+            
             // 删除列定义
             currentColumns.removeIf(column -> column.getColumnIndex() == position);
             
@@ -1641,7 +1857,6 @@ public class NoteViewModel extends AndroidViewModel {
      */
     private void addToUndoStack(TableOperation operation) {
         undoStack.push(operation);
-        redoStack.clear(); // 清空重做栈
         updateUndoRedoState();
     }
     
@@ -1652,22 +1867,11 @@ public class NoteViewModel extends AndroidViewModel {
         if (!undoStack.isEmpty()) {
             TableOperation operation = undoStack.pop();
             executeUndoOperation(operation);
-            redoStack.push(operation);
             updateUndoRedoState();
         }
     }
     
-    /**
-     * 重做操作
-     */
-    public void redo() {
-        if (!redoStack.isEmpty()) {
-            TableOperation operation = redoStack.pop();
-            executeRedoOperation(operation);
-            undoStack.push(operation);
-            updateUndoRedoState();
-        }
-    }
+
     
     /**
      * 执行撤销操作
@@ -1701,40 +1905,128 @@ public class NoteViewModel extends AndroidViewModel {
         }
     }
     
+
+    
     /**
-     * 执行重做操作
+     * 更新撤销状态
      */
-    private void executeRedoOperation(TableOperation operation) {
-        switch (operation.getType()) {
-            case ADD_ROW:
-                // 重做添加行
-                addRowInternal();
-                break;
-            case DELETE_ROW:
-                // 重做删除行
-                deleteRowAtInternal(operation.getPosition());
-                break;
-            case ADD_COLUMN:
-                // 重做添加列
-                addColumnInternal();
-                break;
-            case DELETE_COLUMN:
-                // 重做删除列
-                deleteColumnAtInternal(operation.getPosition());
-                break;
-            case UPDATE_CELL:
-                // 重做单元格更新：应用新值
-                updateCellValueInternal(operation.getPosition() / 1000, operation.getPosition() % 1000, (String) operation.getNewValue());
-                break;
+    private void updateUndoRedoState() {
+        _canUndo.postValue(!undoStack.isEmpty());
+    }
+    
+    /**
+     * 内部更新单元格值方法（不记录操作历史）
+     */
+    private void updateCellValueInternal(int row, int col, String value) {
+        Notebook currentNotebook = _currentNotebook.getValue();
+        if (currentNotebook == null) {
+            return;
+        }
+        
+        // 更新内存中的数据
+        if (isFrozenColumnIndex(col)) {
+            List<Cell> frozenCells = _frozenColumnCells.getValue();
+            if (frozenCells != null) {
+                for (Cell cell : frozenCells) {
+                    if (cell.getRowIndex() == row && cell.getColIndex() == col) {
+                        cell.setContent(value);
+                        break;
+                    }
+                }
+                _frozenColumnCells.postValue(frozenCells);
+            }
+        } else {
+            List<Cell> scrollableCells = _scrollableColumnsCells.getValue();
+            if (scrollableCells != null) {
+                for (Cell cell : scrollableCells) {
+                    if (cell.getRowIndex() == row && cell.getColIndex() == col) {
+                        cell.setContent(value);
+                        break;
+                    }
+                }
+                _scrollableColumnsCells.postValue(scrollableCells);
+            }
+        }
+        
+        markAsModified();
+    }
+    
+    /**
+     * 内部添加行方法（不记录操作历史）
+     */
+    private void addRowInternal() {
+        Integer currentRows = _rowCount.getValue();
+        Integer currentCols = _columnCount.getValue();
+        
+        if (currentRows != null && currentCols != null) {
+            int newRowIndex = currentRows;
+            
+            // 为冻结列添加新行
+            List<Cell> frozenCells = _frozenColumnCells.getValue();
+            if (frozenCells != null) {
+                Cell newFrozenCell = new Cell();
+                newFrozenCell.setRowIndex(newRowIndex);
+                int firstFrozenColIndex = getFirstFrozenColumnIndex();
+                newFrozenCell.setColIndex(firstFrozenColIndex >= 0 ? firstFrozenColIndex : 0);
+                newFrozenCell.setContent("");
+                frozenCells.add(newFrozenCell);
+                _frozenColumnCells.postValue(frozenCells);
+            }
+            
+            // 为可滚动列添加新行
+            List<Cell> scrollableCells = _scrollableColumnsCells.getValue();
+            if (scrollableCells != null) {
+                for (int col = 1; col < currentCols; col++) {
+                    Cell newCell = new Cell();
+                    newCell.setRowIndex(newRowIndex);
+                    newCell.setColIndex(col);
+                    newCell.setContent("");
+                    scrollableCells.add(newCell);
+                }
+                _scrollableColumnsCells.postValue(scrollableCells);
+            }
+            
+            _rowCount.postValue(newRowIndex + 1);
+            markAsModified();
         }
     }
     
     /**
-     * 更新撤销重做状态
+     * 内部添加列方法（不记录操作历史）
      */
-    private void updateUndoRedoState() {
-        _canUndo.postValue(!undoStack.isEmpty());
-        _canRedo.postValue(!redoStack.isEmpty());
+    private void addColumnInternal() {
+        List<Column> currentColumns = _columns.getValue();
+        Integer currentRows = _rowCount.getValue();
+        
+        if (currentColumns != null && currentRows != null) {
+            int newColIndex = currentColumns.size();
+            Column newColumn = new Column();
+            newColumn.setColumnIndex(newColIndex);
+            newColumn.setName("列" + (newColIndex + 1));
+            newColumn.setWidth(150);
+            newColumn.setType("TEXT");
+            newColumn.setVisible(true);
+            newColumn.setFrozen(false);
+            
+            currentColumns.add(newColumn);
+            _columns.postValue(currentColumns);
+            
+            // 为新列添加单元格
+            List<Cell> scrollableCells = _scrollableColumnsCells.getValue();
+            if (scrollableCells != null) {
+                for (int row = 0; row < currentRows; row++) {
+                    Cell newCell = new Cell();
+                    newCell.setRowIndex(row);
+                    newCell.setColIndex(newColIndex);
+                    newCell.setContent("");
+                    scrollableCells.add(newCell);
+                }
+                _scrollableColumnsCells.postValue(scrollableCells);
+            }
+            
+            _columnCount.postValue(currentColumns.size());
+            markAsModified();
+        }
     }
     
     /**
@@ -1810,129 +2102,224 @@ public class NoteViewModel extends AndroidViewModel {
         }
     }
     
+
     /**
-     * 内部添加行方法（不记录操作历史）
+     * 快照指定行的所有单元格数据
+     * @param rowIndex 行索引（原始行索引）
+     * @param totalCols 总列数
+     * @return 该行的所有单元格副本
      */
-    private void addRowInternal() {
-        Integer currentRows = _rowCount.getValue();
-        Integer currentCols = _columnCount.getValue();
+    private List<Cell> snapshotRow(int rowIndex, int totalCols) {
+        List<Cell> rowSnapshot = new ArrayList<>();
         
-        if (currentRows != null && currentCols != null) {
-            int newRowIndex = currentRows;
-            
-            // 添加冻结列单元格
-            List<Cell> frozenCells = _frozenColumnCells.getValue();
-            if (frozenCells != null) {
-                Cell newFrozenCell = new Cell();
-                newFrozenCell.setRowIndex(newRowIndex);
-                newFrozenCell.setColIndex(0);
-                newFrozenCell.setContent("行" + (newRowIndex + 1));
-                frozenCells.add(newFrozenCell);
-                _frozenColumnCells.postValue(frozenCells);
+        // 从源数据缓存中获取该行的所有单元格
+        for (Cell cell : sourceFrozenCells) {
+            if (cell.getRowIndex() == rowIndex) {
+                rowSnapshot.add(createCellCopy(cell));
             }
-            
-            // 添加可滚动列单元格
-            List<Cell> scrollableCells = _scrollableColumnsCells.getValue();
-            if (scrollableCells != null) {
-                for (int col = 1; col < currentCols; col++) {
-                    Cell newCell = new Cell();
-                    newCell.setRowIndex(newRowIndex);
-                    newCell.setColIndex(col);
-                    newCell.setContent("");
-                    scrollableCells.add(newCell);
-                }
-                _scrollableColumnsCells.postValue(scrollableCells);
-            }
-            
-            _rowCount.postValue(currentRows + 1);
         }
+        
+        for (Cell cell : sourceScrollableCells) {
+            if (cell.getRowIndex() == rowIndex) {
+                rowSnapshot.add(createCellCopy(cell));
+            }
+        }
+        
+        // 确保所有列都有单元格（为空列创建空单元格）
+        for (int col = 0; col < totalCols; col++) {
+            boolean found = false;
+            for (Cell cell : rowSnapshot) {
+                if (cell.getColIndex() == col) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                Cell emptyCell = new Cell();
+                emptyCell.setRowIndex(rowIndex);
+                emptyCell.setColIndex(col);
+                emptyCell.setContent("");
+                Notebook notebook = _currentNotebook.getValue();
+                if (notebook != null) {
+                    emptyCell.setNotebookId(notebook.getId());
+                }
+                rowSnapshot.add(emptyCell);
+            }
+        }
+        
+        return rowSnapshot;
     }
     
     /**
-     * 内部添加列方法（不记录操作历史）
+     * 快照指定列的所有单元格数据
+     * @param colIndex 列索引
+     * @param totalRows 总行数
+     * @return 该列的所有单元格副本
      */
-    private void addColumnInternal() {
-        List<Column> currentColumns = _columns.getValue();
-        Integer currentRows = _rowCount.getValue();
+    private List<Cell> snapshotColumn(int colIndex, int totalRows) {
+        List<Cell> columnSnapshot = new ArrayList<>();
         
-        if (currentColumns != null && currentRows != null) {
-            int newColumnIndex = currentColumns.size();
-            
-            // 添加新列定义
-            Column newColumn = new Column();
-            newColumn.setColumnIndex(newColumnIndex);
-            newColumn.setName("列" + (newColumnIndex + 1));
-            newColumn.setWidth(120);
-            newColumn.setType("TEXT");
-            newColumn.setVisible(true);
-            newColumn.setFrozen(false);
-            currentColumns.add(newColumn);
-            _columns.postValue(currentColumns);
-            
-            // 添加新列的单元格
-            List<Cell> scrollableCells = _scrollableColumnsCells.getValue();
-            if (scrollableCells != null) {
-                for (int row = 0; row < currentRows; row++) {
-                    Cell newCell = new Cell();
-                    newCell.setRowIndex(row);
-                    newCell.setColIndex(newColumnIndex);
-                    if (row == 0) {
-                        newCell.setContent("标题" + (newColumnIndex + 1));
-                    } else {
-                        newCell.setContent("");
-                    }
-                    scrollableCells.add(newCell);
+        // 从源数据缓存中获取该列的所有单元格
+        if (isFrozenColumnIndex(colIndex)) {
+            for (Cell cell : sourceFrozenCells) {
+                if (cell.getColIndex() == colIndex) {
+                    columnSnapshot.add(createCellCopy(cell));
                 }
-                _scrollableColumnsCells.postValue(scrollableCells);
-            }
-            
-            _columnCount.postValue(currentColumns.size());
-        }
-    }
-    
-    /**
-     * 内部更新单元格值方法（不记录操作历史）
-     */
-    private void updateCellValueInternal(int rowIndex, int colIndex, String newValue) {
-        if (colIndex == 0) {
-            // 更新冻结列
-            List<Cell> frozenCells = _frozenColumnCells.getValue();
-            if (frozenCells != null) {
-                for (Cell cell : frozenCells) {
-                    if (cell.getRowIndex() == rowIndex && cell.getColIndex() == colIndex) {
-                        cell.setContent(newValue);
-                        break;
-                    }
-                }
-                _frozenColumnCells.postValue(frozenCells);
             }
         } else {
-            // 更新可滚动列
-            List<Cell> scrollableCells = _scrollableColumnsCells.getValue();
-            if (scrollableCells != null) {
-                for (Cell cell : scrollableCells) {
-                    if (cell.getRowIndex() == rowIndex && cell.getColIndex() == colIndex) {
-                        cell.setContent(newValue);
-                        break;
-                    }
+            for (Cell cell : sourceScrollableCells) {
+                if (cell.getColIndex() == colIndex) {
+                    columnSnapshot.add(createCellCopy(cell));
                 }
-                _scrollableColumnsCells.postValue(scrollableCells);
             }
         }
+        
+        // 确保所有行都有单元格（为空行创建空单元格）
+        for (int row = 0; row < totalRows; row++) {
+            boolean found = false;
+            for (Cell cell : columnSnapshot) {
+                if (cell.getRowIndex() == row) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                Cell emptyCell = new Cell();
+                emptyCell.setRowIndex(row);
+                emptyCell.setColIndex(colIndex);
+                emptyCell.setContent("");
+                Notebook notebook = _currentNotebook.getValue();
+                if (notebook != null) {
+                    emptyCell.setNotebookId(notebook.getId());
+                }
+                columnSnapshot.add(emptyCell);
+            }
+        }
+        
+        return columnSnapshot;
     }
     
     /**
      * 恢复行数据
+     * @param position 插入位置
+     * @param rowCells 要恢复的行单元格数据
      */
     private void restoreRowData(int position, List<Cell> rowCells) {
-        // TODO: 实现行数据恢复逻辑
+        if (rowCells == null || rowCells.isEmpty()) {
+            return;
+        }
+        
+        Integer currentRows = _rowCount.getValue();
+        Integer currentCols = _columnCount.getValue();
+        if (currentRows == null || currentCols == null) {
+            return;
+        }
+        
+        // 更新插入位置之后的行索引
+        for (Cell cell : sourceFrozenCells) {
+            if (cell.getRowIndex() >= position) {
+                cell.setRowIndex(cell.getRowIndex() + 1);
+            }
+        }
+        for (Cell cell : sourceScrollableCells) {
+            if (cell.getRowIndex() >= position) {
+                cell.setRowIndex(cell.getRowIndex() + 1);
+            }
+        }
+        
+        // 插入恢复的单元格到源数据缓存
+        for (Cell cell : rowCells) {
+            Cell restoredCell = createCellCopy(cell);
+            restoredCell.setRowIndex(position);
+            
+            if (isFrozenColumnIndex(restoredCell.getColIndex())) {
+                sourceFrozenCells.add(restoredCell);
+            } else {
+                sourceScrollableCells.add(restoredCell);
+            }
+        }
+        
+        // 更新行数
+        _rowCount.postValue(currentRows + 1);
+        
+        // 维护行顺序数组
+        insertKey(position);
+        
+        // 刷新视图
+        refreshViewRespectingFilterAndSort();
+        markAsModified();
     }
     
     /**
      * 恢复列数据
+     * @param position 插入位置
+     * @param column 要恢复的列定义
+     * @param columnCells 要恢复的列单元格数据
      */
     private void restoreColumnData(int position, Column column, List<Cell> columnCells) {
-        // TODO: 实现列数据恢复逻辑
+        if (column == null) {
+            return;
+        }
+        
+        Integer currentRows = _rowCount.getValue();
+        Integer currentCols = _columnCount.getValue();
+        if (currentRows == null || currentCols == null) {
+            return;
+        }
+        
+        // 更新插入位置之后的列索引
+        List<Column> currentColumns = _columns.getValue();
+        if (currentColumns != null) {
+            for (Column col : currentColumns) {
+                if (col.getColumnIndex() >= position) {
+                    col.setColumnIndex(col.getColumnIndex() + 1);
+                }
+            }
+            
+            // 插入恢复的列
+            Column restoredColumn = new Column();
+            restoredColumn.setColumnIndex(position);
+            restoredColumn.setName(column.getName());
+            restoredColumn.setWidth(column.getWidth());
+            restoredColumn.setType(column.getType());
+            restoredColumn.setVisible(column.isVisible());
+            restoredColumn.setFrozen(column.isFrozen());
+            currentColumns.add(position, restoredColumn);
+            _columns.postValue(currentColumns);
+        }
+        
+        // 更新所有单元格的列索引
+        for (Cell cell : sourceFrozenCells) {
+            if (cell.getColIndex() >= position) {
+                cell.setColIndex(cell.getColIndex() + 1);
+            }
+        }
+        for (Cell cell : sourceScrollableCells) {
+            if (cell.getColIndex() >= position) {
+                cell.setColIndex(cell.getColIndex() + 1);
+            }
+        }
+        
+        // 插入恢复的单元格到源数据缓存
+        if (columnCells != null) {
+            for (Cell cell : columnCells) {
+                Cell restoredCell = createCellCopy(cell);
+                restoredCell.setColIndex(position);
+                
+                if (isFrozenColumnIndex(position)) {
+                    sourceFrozenCells.add(restoredCell);
+                } else {
+                    sourceScrollableCells.add(restoredCell);
+                }
+            }
+        }
+        
+        // 更新列数
+        _columnCount.postValue(currentCols + 1);
+        
+        // 刷新视图
+        refreshViewRespectingFilterAndSort();
+        markAsModified();
     }
     
     /**
@@ -2113,11 +2500,21 @@ public class NoteViewModel extends AndroidViewModel {
             return;
         }
         
-        cellRepository.updateCellFormat(notebook.getId(), row, col, textColor, backgroundColor, 
+        // 行号映射：将显示行号转换为原始行号
+        final int originalRow;
+        if (currentRowOrder != null && row < currentRowOrder.length) {
+            originalRow = currentRowOrder[row];
+            Log.d(TAG, "Row mapping for style update: display row " + row + " -> original row " + originalRow);
+        } else {
+            originalRow = row;
+        }
+        
+        // 使用原始行号进行数据库操作
+        cellRepository.updateCellFormat(notebook.getId(), originalRow, col, textColor, backgroundColor, 
                                       isBold, isItalic, textSize, textAlignment, new CellRepository.RepositoryCallback<Void>() {
             @Override
             public void onSuccess(Void result) {
-                // 更新本地数据
+                // 更新本地数据（使用显示行号）
                 updateLocalCellStyle(row, col, textColor, backgroundColor, isBold, isItalic, textSize, textAlignment);
                 markAsModified();
             }
@@ -2289,7 +2686,7 @@ public class NoteViewModel extends AndroidViewModel {
                     List<Cell> newScrollableCells = new ArrayList<>();
                     
                     for (Cell cell : result) {
-                        if (cell.getColIndex() == 0) {
+                        if (isFrozenColumnIndex(cell.getColIndex())) {
                             newFrozenCells.add(cell);
                         } else {
                             newScrollableCells.add(cell);
@@ -2576,4 +2973,70 @@ public class NoteViewModel extends AndroidViewModel {
         activeVisibleRows = null;
         refreshViewRespectingFilterAndSort();
     }
+    
+    // ==================== 视口状态管理方法 ====================
+    
+    /**
+     * 获取当前缩放比例
+     */
+    public LiveData<Float> getScale() {
+        return scale;
+    }
+    
+    /**
+     * 获取当前X偏移量
+     */
+    public LiveData<Float> getOffsetX() {
+        return offsetX;
+    }
+    
+    /**
+     * 获取当前Y偏移量
+     */
+    public LiveData<Float> getOffsetY() {
+        return offsetY;
+    }
+    
+    /**
+     * 更新视口状态
+     */
+    public void updateViewport(float scale, float offsetX, float offsetY) {
+        _scale.setValue(scale);
+        _offsetX.setValue(offsetX);
+        _offsetY.setValue(offsetY);
+    }
+    
+    /**
+     * 重置视口到初始状态
+     */
+    public void resetViewport() {
+        _scale.setValue(1.0f);
+        _offsetX.setValue(0f);
+        _offsetY.setValue(0f);
+    }
+    
+    /**
+     * 获取当前缩放比例值
+     */
+    public float getCurrentScale() {
+        Float currentScale = _scale.getValue();
+        return currentScale != null ? currentScale : 1.0f;
+    }
+    
+    /**
+     * 获取当前X偏移量值
+     */
+    public float getCurrentOffsetX() {
+        Float currentOffsetX = _offsetX.getValue();
+        return currentOffsetX != null ? currentOffsetX : 0f;
+    }
+    
+    /**
+     * 获取当前Y偏移量值
+     */
+    public float getCurrentOffsetY() {
+        Float currentOffsetY = _offsetY.getValue();
+        return currentOffsetY != null ? currentOffsetY : 0f;
+    }
+
 }

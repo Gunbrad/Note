@@ -25,10 +25,11 @@ public class CellRepository {
     private static volatile CellRepository INSTANCE;
     
     private final CellDao cellDao;
+    private final AppDatabase database;
     private final Executor executor;
     
     private CellRepository(Context context) {
-        AppDatabase database = AppDatabase.getInstance(context);
+        database = AppDatabase.getInstance(context);
         cellDao = database.cellDao();
         executor = Executors.newFixedThreadPool(4);
     }
@@ -232,44 +233,58 @@ public class CellRepository {
     }
     
     /**
-     * 更新单元格内容
+     * 替换指定笔记本的所有单元格（先删除再插入，避免SQLite兼容性问题）
+     */
+    public void replaceAllCells(long notebookId, List<Cell> cells, RepositoryCallback<Void> callback) {
+        executor.execute(() -> {
+            try {
+                database.runInTransaction(() -> {
+                    // 先删除该笔记本的所有单元格
+                    cellDao.deleteCellsByNotebookId(notebookId);
+                    
+                    // 清理id并设置时间戳，避免主键冲突
+                    long now = DateUtils.now();
+                    for (Cell cell : cells) {
+                        cell.setId(0); // 让Room走自增主键
+                        cell.setUpdatedAt(now);
+                        if (cell.getCreatedAt() == 0) {
+                            cell.setCreatedAt(now);
+                        }
+                    }
+                    
+                    // 重新插入所有单元格
+                    cellDao.insertAll(cells);
+                });
+                
+                if (callback != null) {
+                    callback.onSuccess(null);
+                }
+                Log.d(TAG, "Replaced all cells for notebook " + notebookId + ": " + cells.size() + " cells");
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to replace all cells", e);
+                if (callback != null) {
+                    callback.onError(e);
+                }
+            }
+        });
+    }
+    
+    /**
+     * 更新单元格内容（使用复合键UPSERT）
      */
     public void updateCellContent(long notebookId, int row, int col, String content, RepositoryCallback<Void> callback) {
         executor.execute(() -> {
             try {
-                Cell cell = cellDao.getCellByPositionSync(notebookId, row, col);
-                int result = 0;
-                if (cell != null) {
-                    result = cellDao.updateContent(cell.getId(), content, DateUtils.now());
-                }
+                long now = DateUtils.now();
+                // 使用复合键UPSERT，避免查询和条件判断
+                cellDao.upsertCellContent(notebookId, row, col, content, now, now);
                 
-                if (result > 0) {
-                    if (callback != null) {
-                        callback.onSuccess(null);
-                    }
-                    Log.d(TAG, "Cell content updated: (" + row + ", " + col + ")");
-                } else {
-                    // 如果更新失败，可能是单元格不存在，创建新单元格
-                    Cell newCell = new Cell(notebookId, row, col);
-                    newCell.setContent(content);
-                    saveCell(newCell, new RepositoryCallback<Long>() {
-                        @Override
-                        public void onSuccess(Long result) {
-                            if (callback != null) {
-                                callback.onSuccess(null);
-                            }
-                        }
-                        
-                        @Override
-                        public void onError(Exception error) {
-                            if (callback != null) {
-                                callback.onError(error);
-                            }
-                        }
-                    });
+                if (callback != null) {
+                    callback.onSuccess(null);
                 }
+                Log.d(TAG, "Cell content upserted: (" + row + ", " + col + ")");
             } catch (Exception e) {
-                Log.e(TAG, "Failed to update cell content", e);
+                Log.e(TAG, "Failed to upsert cell content", e);
                 if (callback != null) {
                     callback.onError(e);
                 }
@@ -330,48 +345,17 @@ public class CellRepository {
                                 boolean isBold, boolean isItalic, float textSize, String textAlignment, RepositoryCallback<Void> callback) {
         executor.execute(() -> {
             try {
-                Cell cell = cellDao.getCellByPositionSync(notebookId, row, col);
-                if (cell != null) {
-                    int result = cellDao.updateFormat(cell.getId(), textColor, backgroundColor, 
-                                                    isBold, isItalic, textSize, textAlignment, DateUtils.now());
-                    
-                    if (result > 0) {
-                        if (callback != null) {
-                            callback.onSuccess(null);
-                        }
-                        Log.d(TAG, "Cell format updated: (" + row + ", " + col + ")");
-                    } else {
-                        if (callback != null) {
-                            callback.onError(new Exception("Failed to update cell format"));
-                        }
-                    }
-                } else {
-                    // 如果更新失败，可能是单元格不存在，创建新单元格
-                    Cell newCell = new Cell(notebookId, row, col);
-                    newCell.setTextColor(textColor);
-                    newCell.setBackgroundColor(backgroundColor);
-                    newCell.setBold(isBold);
-                    newCell.setItalic(isItalic);
-                    newCell.setTextSize(textSize);
-                    newCell.setTextAlignment(textAlignment);
-                    saveCell(newCell, new RepositoryCallback<Long>() {
-                        @Override
-                        public void onSuccess(Long result) {
-                            if (callback != null) {
-                                callback.onSuccess(null);
-                            }
-                        }
-                        
-                        @Override
-                        public void onError(Exception error) {
-                            if (callback != null) {
-                                callback.onError(error);
-                            }
-                        }
-                    });
+                long now = DateUtils.now();
+                // 使用复合键UPSERT，避免查询和条件判断
+                cellDao.upsertCellFormat(notebookId, row, col, textColor, backgroundColor, 
+                                       isBold, isItalic, textSize, textAlignment, now, now);
+                
+                if (callback != null) {
+                    callback.onSuccess(null);
                 }
+                Log.d(TAG, "Cell format upserted: (" + row + ", " + col + ")");
             } catch (Exception e) {
-                Log.e(TAG, "Failed to update cell format", e);
+                Log.e(TAG, "Failed to upsert cell format", e);
                 if (callback != null) {
                     callback.onError(e);
                 }

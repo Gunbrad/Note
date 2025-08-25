@@ -12,7 +12,10 @@ import android.view.View;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.TextView;
+import androidx.appcompat.widget.PopupMenu;
+import com.google.android.material.button.MaterialButton;
 
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
 import androidx.lifecycle.ViewModelProvider;
@@ -21,18 +24,21 @@ import androidx.recyclerview.widget.StaggeredGridLayoutManager;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import com.example.note.R;
+import java.util.ArrayList;
 import com.example.note.data.entity.Notebook;
 import com.example.note.data.repository.NotebookRepository;
 import com.example.note.ui.dialog.CreateNotebookDialog;
-import com.example.note.ui.dialog.SortFilterDialog;
-import com.example.note.ui.template.TemplateSelectionActivity;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.android.material.snackbar.Snackbar;
 
 import android.content.Intent;
 
+
 import java.util.ArrayList;
 import java.util.List;
+
+
+
 
 /**
  * 主页Activity
@@ -47,7 +53,7 @@ public class MainActivity extends AppCompatActivity implements CreateNotebookDia
     private Toolbar toolbar;
     private EditText searchEditText;
     private ImageView searchClearButton;
-    private SwipeRefreshLayout swipeRefreshLayout;
+    private MaterialButton sortButton;
     private RecyclerView recyclerView;
     private View emptyView;
     private View progressBar;
@@ -61,18 +67,34 @@ public class MainActivity extends AppCompatActivity implements CreateNotebookDia
     private Handler searchHandler = new Handler(Looper.getMainLooper());
     private Runnable searchRunnable;
     
+
+    
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         
+
+        
+        // 直接初始化应用
+        initializeApp();
+    }
+    
+    /**
+     * 初始化应用
+     */
+    private void initializeApp() {
         initViews();
         initViewModel();
         initRecyclerView();
         initSearchView();
         setupObservers();
         setupListeners();
+        
+
     }
+    
+
     
     /**
      * 初始化视图组件
@@ -81,7 +103,7 @@ public class MainActivity extends AppCompatActivity implements CreateNotebookDia
         toolbar = findViewById(R.id.toolbar);
         searchEditText = findViewById(R.id.search_edit_text);
         searchClearButton = findViewById(R.id.search_clear_button);
-        swipeRefreshLayout = findViewById(R.id.swipe_refresh_layout);
+        sortButton = findViewById(R.id.sort_button);
         recyclerView = findViewById(R.id.recycler_view);
         // emptyView已在上面定义
         emptyView = findViewById(R.id.empty_view);
@@ -106,11 +128,24 @@ public class MainActivity extends AppCompatActivity implements CreateNotebookDia
      */
     private void initRecyclerView() {
         // 创建适配器
-        adapter = new NotebookAdapter();
+        adapter = new NotebookAdapter(this);
         
         // 设置点击监听器
         adapter.setOnItemClickListener(this::openNotebook);
         adapter.setOnItemLongClickListener(this::showNotebookMenu);
+        
+        // 设置菜单动作监听器
+        adapter.setOnMenuActionListener(new NotebookAdapter.OnMenuActionListener() {
+            @Override
+            public void onDeleteNotebook(Notebook notebook) {
+                deleteNotebook(notebook);
+            }
+            
+            @Override
+            public void onPinNotebook(Notebook notebook) {
+                pinNotebook(notebook);
+            }
+        });
         
         // 设置布局管理器（2列瀑布流）
         StaggeredGridLayoutManager layoutManager = new StaggeredGridLayoutManager(
@@ -170,7 +205,8 @@ public class MainActivity extends AppCompatActivity implements CreateNotebookDia
         // 观察笔记本列表
         viewModel.notebooks.observe(this, notebooks -> {
             if (notebooks != null) {
-                adapter.submitList(notebooks);
+                // 确保传递新的ArrayList实例给adapter，避免DiffUtil比较问题
+                adapter.submitList(new ArrayList<>(notebooks));
                 updateEmptyState(notebooks.isEmpty());
             }
         });
@@ -182,17 +218,19 @@ public class MainActivity extends AppCompatActivity implements CreateNotebookDia
             }
         });
         
-        // 观察刷新状态
-        viewModel.isRefreshing.observe(this, isRefreshing -> {
-            if (isRefreshing != null) {
-                swipeRefreshLayout.setRefreshing(isRefreshing);
-            }
-        });
+        // 刷新状态观察者已删除
         
         // 观察布局模式变化
         viewModel.layoutMode.observe(this, layoutMode -> {
             if (layoutMode != null) {
                 updateLayoutMode(layoutMode);
+            }
+        });
+        
+        // 观察排序类型变化
+        viewModel.sortType.observe(this, sortType -> {
+            if (sortType != null) {
+                updateSortButtonText(getSortTypeDisplayName(sortType));
             }
         });
     }
@@ -201,14 +239,14 @@ public class MainActivity extends AppCompatActivity implements CreateNotebookDia
      * 设置事件监听器
      */
     private void setupListeners() {
-        // 下拉刷新
-        swipeRefreshLayout.setOnRefreshListener(() -> viewModel.onRefresh());
-        
         // 搜索清除按钮
         searchClearButton.setOnClickListener(v -> {
             searchEditText.setText("");
             searchEditText.clearFocus();
         });
+        
+        // 排序按钮
+        sortButton.setOnClickListener(v -> showSortMenu());
         
         // 浮动操作按钮
         fab.setOnClickListener(v -> showCreateNotebookDialog());
@@ -286,9 +324,12 @@ public class MainActivity extends AppCompatActivity implements CreateNotebookDia
                 if (exists) {
                     Snackbar.make(recyclerView, "笔记名称已存在，请使用其他名称", Snackbar.LENGTH_LONG).show();
                 } else {
-                    // 跳转到模板选择界面
-                    Intent intent = new Intent(MainActivity.this, TemplateSelectionActivity.class);
-                    intent.putExtra(TemplateSelectionActivity.EXTRA_NOTEBOOK_NAME, name);
+                    // 直接创建空表格笔记
+                    Intent intent = new Intent(MainActivity.this, com.example.note.ui.note.NoteActivity.class);
+                    intent.putExtra(com.example.note.ui.note.NoteActivity.EXTRA_NOTEBOOK_NAME, name);
+                    intent.putExtra(com.example.note.ui.note.NoteActivity.EXTRA_ROWS, 0);
+                    intent.putExtra(com.example.note.ui.note.NoteActivity.EXTRA_COLS, 0);
+                    intent.putExtra(com.example.note.ui.note.NoteActivity.EXTRA_IS_NEW, true);
                     startActivity(intent);
                 }
             }
@@ -302,36 +343,105 @@ public class MainActivity extends AppCompatActivity implements CreateNotebookDia
     }
     
     /**
-     * 显示排序/筛选对话框
+     * 显示排序菜单
      */
-    private void showSortFilterDialog() {
-        SortFilterDialog dialog = SortFilterDialog.newInstance(
-                viewModel.getCurrentSortType(),
-                viewModel.getCurrentFilterColor()
-        );
+    private void showSortMenu() {
+        PopupMenu popup = new PopupMenu(this, sortButton);
+        popup.getMenuInflater().inflate(R.menu.menu_sort_options, popup.getMenu());
         
-        dialog.setOnSortFilterListener(new SortFilterDialog.OnSortFilterListener() {
-            @Override
-            public void onSortFilterApplied(MainViewModel.SortType sortType, String filterColor) {
-                viewModel.setSortType(sortType);
-                viewModel.setFilterColor(filterColor);
-                
-                String message = "已应用排序: " + sortType.getDisplayName();
-                if (filterColor != null) {
-                    message += "，颜色筛选已启用";
-                }
-                Snackbar.make(recyclerView, message, Snackbar.LENGTH_SHORT).show();
+        popup.setOnMenuItemClickListener(item -> {
+            MainViewModel.SortType sortType = null;
+            String sortText = "";
+            
+            int id = item.getItemId();
+            if (id == R.id.sort_title_asc) {
+                sortType = MainViewModel.SortType.TITLE_ASC;
+                sortText = "标题升序";
+            } else if (id == R.id.sort_title_desc) {
+                sortType = MainViewModel.SortType.TITLE_DESC;
+                sortText = "标题降序";
+            } else if (id == R.id.sort_created_asc) {
+                sortType = MainViewModel.SortType.CREATED_ASC;
+                sortText = "创建时间升序";
+            } else if (id == R.id.sort_created_desc) {
+                sortType = MainViewModel.SortType.CREATED_DESC;
+                sortText = "创建时间降序";
+            } else if (id == R.id.sort_updated_asc) {
+                sortType = MainViewModel.SortType.UPDATED_ASC;
+                sortText = "更新时间升序";
+            } else if (id == R.id.sort_updated_desc) {
+                sortType = MainViewModel.SortType.UPDATED_DESC;
+                sortText = "更新时间降序";
             }
             
-            @Override
-            public void onFiltersCleared() {
-                viewModel.clearFilters();
-                Snackbar.make(recyclerView, "已清除所有筛选条件", Snackbar.LENGTH_SHORT).show();
+            if (sortType != null) {
+                viewModel.setSortType(sortType);
+                updateSortButtonText(sortText);
+                Snackbar.make(recyclerView, "已应用排序: " + sortText, Snackbar.LENGTH_SHORT).show();
             }
+            
+            return true;
         });
         
-        dialog.show(getSupportFragmentManager(), "SortFilterDialog");
+        popup.show();
     }
+    
+    /**
+     * 更新排序按钮文本
+     */
+    private void updateSortButtonText(String sortText) {
+        sortButton.setText(sortText);
+    }
+    
+    /**
+     * 获取排序类型的显示名称
+     */
+    private String getSortTypeDisplayName(MainViewModel.SortType sortType) {
+        switch (sortType) {
+            case TITLE_ASC:
+                return "标题升序";
+            case TITLE_DESC:
+                return "标题降序";
+            case CREATED_ASC:
+                return "创建时间升序";
+            case CREATED_DESC:
+                return "创建时间降序";
+            case UPDATED_ASC:
+                return "更新时间升序";
+            case UPDATED_DESC:
+            default:
+                return "更新时间降序";
+        }
+    }
+    
+    /**
+     * 删除笔记本
+     */
+    private void deleteNotebook(Notebook notebook) {
+        // 显示确认对话框
+        new AlertDialog.Builder(this)
+                .setTitle("删除笔记本")
+                .setMessage("确定要删除笔记本 \"" + notebook.getTitle() + "\" 吗？\n\n删除后将移入回收站，可以恢复。")
+                .setPositiveButton("删除", (dialog, which) -> {
+                    viewModel.deleteNotebook(notebook.getId());
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+    
+    /**
+     * 置顶笔记本
+     */
+    private void pinNotebook(Notebook notebook) {
+        if (notebook.isPinned()) {
+            // 如果已经置顶，则取消置顶
+            viewModel.unpinNotebook(notebook.getId());
+        } else {
+            // 如果未置顶，则置顶
+            viewModel.pinNotebook(notebook.getId());
+        }
+    }
+
     
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
@@ -343,18 +453,17 @@ public class MainActivity extends AppCompatActivity implements CreateNotebookDia
     public boolean onOptionsItemSelected(MenuItem item) {
         int id = item.getItemId();
         
-        if (id == R.id.action_sort) {
-            showSortFilterDialog();
-            return true;
-        } else if (id == R.id.action_filter) {
-            showSortFilterDialog();
-            return true;
-        } else if (id == R.id.action_layout) {
+        if (id == R.id.action_layout) {
             viewModel.setLayoutMode(getNextLayoutMode());
             return true;
         } else if (id == R.id.action_settings) {
             // TODO: 打开设置页面
             Snackbar.make(recyclerView, "打开设置", Snackbar.LENGTH_SHORT).show();
+            return true;
+        } else if (id == R.id.action_about) {
+            // 打开关于页面
+            Intent intent = new Intent(this, com.example.note.ui.about.AboutActivity.class);
+            startActivity(intent);
             return true;
         }
         
@@ -377,8 +486,12 @@ public class MainActivity extends AppCompatActivity implements CreateNotebookDia
         }
     }
     
-    @Override
-    protected void onDestroy() {
+
+    
+
+     
+     @Override
+     protected void onDestroy() {
         super.onDestroy();
         // 清理搜索处理器
         if (searchHandler != null && searchRunnable != null) {

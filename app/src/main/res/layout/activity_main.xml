@@ -30,67 +30,103 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:padding="16dp"
-            android:background="?attr/colorPrimary">
+            android:background="?attr/colorPrimary"
+            android:gravity="center_vertical">
 
-            <com.google.android.material.textfield.TextInputLayout
+            <!-- 搜索框容器 -->
+            <LinearLayout
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="48dp"
                 android:layout_weight="1"
-                app:boxBackgroundMode="filled"
-                app:boxBackgroundColor="@color/search_background"
-                app:boxCornerRadiusTopStart="24dp"
-                app:boxCornerRadiusTopEnd="24dp"
-                app:boxCornerRadiusBottomStart="24dp"
-                app:boxCornerRadiusBottomEnd="24dp"
-                app:boxStrokeWidth="0dp"
-                app:boxStrokeWidthFocused="0dp"
-                app:hintEnabled="false">
+                android:orientation="horizontal"
+                android:background="@drawable/search_background"
+                android:gravity="center_vertical"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp">
 
-                <com.google.android.material.textfield.TextInputEditText
+                <!-- 搜索图标 -->
+                <ImageView
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:src="@drawable/ic_search_24"
+                    android:contentDescription="搜索图标"
+                    app:tint="@android:color/darker_gray" />
+
+                <!-- 搜索输入框 -->
+                <EditText
                     android:id="@+id/search_edit_text"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:layout_marginStart="12dp"
+                    android:layout_marginEnd="8dp"
+                    android:background="@null"
                     android:hint="搜索笔记本..."
                     android:imeOptions="actionSearch"
                     android:inputType="text"
                     android:maxLines="1"
-                    android:paddingStart="16dp"
-                    android:paddingEnd="48dp"
-                    android:textColor="@color/search_text_color"
-                    android:textColorHint="@color/search_hint_color"
+                    android:textColor="@android:color/black"
+                    android:textColorHint="@android:color/darker_gray"
                     android:textSize="16sp" />
 
-            </com.google.android.material.textfield.TextInputLayout>
+                <!-- 清除按钮 -->
+                <ImageView
+                    android:id="@+id/search_clear_button"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:src="@drawable/ic_clear_24"
+                    android:contentDescription="清除搜索"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:padding="4dp"
+                    android:visibility="gone"
+                    app:tint="@android:color/darker_gray" />
 
-            <!-- 搜索清除按钮 -->
-            <ImageView
-                android:id="@+id/search_clear_button"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:layout_gravity="center_vertical"
-                android:layout_marginStart="-40dp"
-                android:layout_marginEnd="8dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="清除搜索"
-                android:padding="4dp"
-                android:src="@drawable/ic_clear_24"
-                android:visibility="gone"
-                app:tint="@color/search_icon_color" />
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- 排序选择器 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="16dp"
+            android:paddingTop="8dp"
+            android:background="?attr/colorPrimary"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="排序："
+                android:textColor="@android:color/white"
+                android:textSize="14sp"
+                android:layout_marginEnd="8dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/sort_button"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:text="更新时间升序"
+                android:textColor="@android:color/white"
+                android:textSize="12sp"
+                android:minWidth="0dp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                app:icon="@drawable/ic_arrow_drop_down_24"
+                app:iconGravity="end"
+                app:iconTint="@android:color/white" />
 
         </LinearLayout>
 
     </com.google.android.material.appbar.AppBarLayout>
 
     <!-- 主内容区域 -->
-    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-        android:id="@+id/swipe_refresh_layout"
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         app:layout_behavior="@string/appbar_scrolling_view_behavior">
-
-        <FrameLayout
-            android:layout_width="match_parent"
-            android:layout_height="match_parent">
 
             <!-- 笔记本列表 -->
             <androidx.recyclerview.widget.RecyclerView
@@ -148,9 +184,7 @@
                 android:layout_gravity="center"
                 android:visibility="gone" />
 
-        </FrameLayout>
-
-    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+    </FrameLayout>
 
     <!-- 添加按钮 -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton

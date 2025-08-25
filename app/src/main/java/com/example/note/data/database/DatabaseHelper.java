@@ -77,20 +77,20 @@ public class DatabaseHelper {
     private void createFtsTable(SupportSQLiteDatabase db) {
         try {
             // 创建FTS虚拟表
-            db.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS cells_fts USING fts4(content=cells, content_text)");
+            db.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS cells_fts USING fts4(content=cells, content)");
             
             // 创建触发器
             db.execSQL("CREATE TRIGGER IF NOT EXISTS cells_fts_insert AFTER INSERT ON cells BEGIN " +
-                    "INSERT INTO cells_fts(docid, content_text) VALUES (new.id, new.content); END;");
+                    "INSERT INTO cells_fts(docid, content) VALUES (new.id, new.content); END;");
             
             db.execSQL("CREATE TRIGGER IF NOT EXISTS cells_fts_update AFTER UPDATE ON cells BEGIN " +
-                    "UPDATE cells_fts SET content_text = new.content WHERE docid = new.id; END;");
+                    "UPDATE cells_fts SET content = new.content WHERE docid = new.id; END;");
             
             db.execSQL("CREATE TRIGGER IF NOT EXISTS cells_fts_delete AFTER DELETE ON cells BEGIN " +
                     "DELETE FROM cells_fts WHERE docid = old.id; END;");
             
             // 初始化FTS表数据
-            db.execSQL("INSERT INTO cells_fts(docid, content_text) SELECT id, content FROM cells WHERE content IS NOT NULL AND content != ''");
+            db.execSQL("INSERT INTO cells_fts(docid, content) SELECT id, content FROM cells WHERE content IS NOT NULL AND content != ''");
             
             Log.d(TAG, "FTS table and triggers created successfully");
         } catch (Exception e) {
@@ -106,8 +106,7 @@ public class DatabaseHelper {
             String[] triggerNames = {
                 "cells_fts_insert",
                 "cells_fts_update", 
-                "cells_fts_delete",
-                "update_notebook_time"
+                "cells_fts_delete"
             };
             
             for (String triggerName : triggerNames) {
@@ -135,20 +134,17 @@ public class DatabaseHelper {
             switch (triggerName) {
                 case "cells_fts_insert":
                     db.execSQL("CREATE TRIGGER IF NOT EXISTS cells_fts_insert AFTER INSERT ON cells BEGIN " +
-                            "INSERT INTO cells_fts(docid, content_text) VALUES (new.id, new.content); END;");
+                            "INSERT INTO cells_fts(docid, content) VALUES (new.id, new.content); END;");
                     break;
                 case "cells_fts_update":
                     db.execSQL("CREATE TRIGGER IF NOT EXISTS cells_fts_update AFTER UPDATE ON cells BEGIN " +
-                            "UPDATE cells_fts SET content_text = new.content WHERE docid = new.id; END;");
+                            "UPDATE cells_fts SET content = new.content WHERE docid = new.id; END;");
                     break;
                 case "cells_fts_delete":
                     db.execSQL("CREATE TRIGGER IF NOT EXISTS cells_fts_delete AFTER DELETE ON cells BEGIN " +
                             "DELETE FROM cells_fts WHERE docid = old.id; END;");
                     break;
-                case "update_notebook_time":
-                    db.execSQL("CREATE TRIGGER IF NOT EXISTS update_notebook_time AFTER UPDATE ON cells BEGIN " +
-                            "UPDATE notebooks SET updated_at = " + System.currentTimeMillis() + " WHERE id = new.notebook_id; END;");
-                    break;
+
             }
             Log.d(TAG, "Created missing trigger: " + triggerName);
         } catch (Exception e) {

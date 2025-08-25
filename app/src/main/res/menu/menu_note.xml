@@ -4,50 +4,9 @@
 
     <item
         android:id="@+id/action_save"
-        android:title="保存"
         android:icon="@drawable/ic_save"
+        android:title="保存"
         app:showAsAction="ifRoom" />
-
-    <item
-        android:id="@+id/action_add_column"
-        android:title="添加列"
-        android:icon="@drawable/ic_add_column"
-        app:showAsAction="ifRoom" />
-
-    <item
-        android:id="@+id/action_add_row"
-        android:title="添加行"
-        android:icon="@drawable/ic_add_row"
-        app:showAsAction="ifRoom" />
-
-
-
-    <item
-        android:id="@+id/action_insert_row"
-        android:title="插入行"
-        app:showAsAction="never" />
-
-    <item
-        android:id="@+id/action_insert_column"
-        android:title="插入列"
-        app:showAsAction="never" />
-
-    <item
-        android:id="@+id/action_delete_row"
-        android:title="删除行"
-        app:showAsAction="never" />
-
-    <item
-        android:id="@+id/action_delete_column"
-        android:title="删除列"
-        app:showAsAction="never" />
-
-    <!-- 删除向下填充功能 -->
-
-    <item
-        android:id="@+id/action_save_as_template"
-        android:title="存为模板"
-        app:showAsAction="never" />
 
     <item
         android:id="@+id/action_settings"

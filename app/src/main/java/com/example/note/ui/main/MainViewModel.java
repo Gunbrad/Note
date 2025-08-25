@@ -1,6 +1,8 @@
 package com.example.note.ui.main;
 
 import android.app.Application;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -14,6 +16,9 @@ import com.example.note.data.repository.NotebookRepository;
 import com.example.note.ui.base.BaseViewModel;
 import com.example.note.util.ColorUtils;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -34,9 +39,7 @@ public class MainViewModel extends BaseViewModel {
     private final MutableLiveData<SortType> _sortType = new MutableLiveData<>(SortType.UPDATED_DESC);
     public final LiveData<SortType> sortType = _sortType;
     
-    // 筛选颜色
-    private final MutableLiveData<String> _filterColor = new MutableLiveData<>(null);
-    public final LiveData<String> filterColor = _filterColor;
+
     
     // 笔记本列表（根据搜索和筛选条件动态变化）
     private final MediatorLiveData<List<Notebook>> _notebooks = new MediatorLiveData<>();
@@ -80,77 +83,127 @@ public class MainViewModel extends BaseViewModel {
         // 添加数据源
         _notebooks.addSource(allNotebooks, this::updateNotebooks);
         _notebooks.addSource(_searchQuery, query -> updateNotebooks(allNotebooks.getValue()));
-        _notebooks.addSource(_filterColor, color -> updateNotebooks(allNotebooks.getValue()));
         _notebooks.addSource(_sortType, sortType -> updateNotebooks(allNotebooks.getValue()));
     }
     
     /**
      * 更新笔记本列表
      */
-    private void updateNotebooks(List<Notebook> notebooks) {
-        if (notebooks == null) {
+    private void updateNotebooks(List<Notebook> source) {
+        if (source == null) {
             _notebooks.setValue(null);
             setEmpty(true);
             return;
         }
         
-        List<Notebook> filteredNotebooks = filterAndSortNotebooks(notebooks);
-        _notebooks.setValue(filteredNotebooks);
-        setEmpty(filteredNotebooks.isEmpty());
+        // 重要：永远返回"新实例"
+        List<Notebook> result = filterAndSortNotebooks(source);
+        _notebooks.setValue(result); // result 已是新实例
+        setEmpty(result.isEmpty());
     }
     
     /**
      * 筛选和排序笔记本
      */
-    private List<Notebook> filterAndSortNotebooks(List<Notebook> notebooks) {
-        if (notebooks == null || notebooks.isEmpty()) {
-            return notebooks;
+    private List<Notebook> filterAndSortNotebooks(List<Notebook> source) {
+        if (source == null || source.isEmpty()) {
+            return new ArrayList<>();
         }
         
-        // 应用搜索筛选
+        // 重要：先复制，后续所有操作都基于副本
+        List<Notebook> list = new ArrayList<>(source);
+        
+        // 应用搜索筛选（仅支持笔记名模糊匹配）
         String query = _searchQuery.getValue();
         if (query != null && !query.trim().isEmpty()) {
             String lowerQuery = query.toLowerCase().trim();
-            notebooks = notebooks.stream()
-                    .filter(notebook -> notebook.getTitle().toLowerCase().contains(lowerQuery))
-                    .collect(java.util.stream.Collectors.toList());
-        }
-        
-        // 应用颜色筛选
-        String color = _filterColor.getValue();
-        if (color != null && !color.trim().isEmpty()) {
-            notebooks = notebooks.stream()
-                    .filter(notebook -> color.equals(notebook.getColor()))
-                    .collect(java.util.stream.Collectors.toList());
-        }
-        
-        // 应用排序
-        SortType sort = _sortType.getValue();
-        if (sort != null) {
-            switch (sort) {
-                case TITLE_ASC:
-                    notebooks.sort((a, b) -> a.getTitle().compareToIgnoreCase(b.getTitle()));
-                    break;
-                case TITLE_DESC:
-                    notebooks.sort((a, b) -> b.getTitle().compareToIgnoreCase(a.getTitle()));
-                    break;
-                case CREATED_ASC:
-                    notebooks.sort((a, b) -> Long.compare(a.getCreatedAt(), b.getCreatedAt()));
-                    break;
-                case CREATED_DESC:
-                    notebooks.sort((a, b) -> Long.compare(b.getCreatedAt(), a.getCreatedAt()));
-                    break;
-                case UPDATED_ASC:
-                    notebooks.sort((a, b) -> Long.compare(a.getUpdatedAt(), b.getUpdatedAt()));
-                    break;
-                case UPDATED_DESC:
-                default:
-                    notebooks.sort((a, b) -> Long.compare(b.getUpdatedAt(), a.getUpdatedAt()));
-                    break;
+            List<Notebook> filtered = new ArrayList<>();
+            for (Notebook notebook : list) {
+                if (notebook.getTitle() != null && notebook.getTitle().toLowerCase().contains(lowerQuery)) {
+                    filtered.add(notebook);
+                }
             }
+            list = filtered; // 新实例
         }
         
-        return notebooks;
+        // 应用排序（置顶的笔记本始终在前面）
+        SortType sort = _sortType.getValue();
+        if (sort == null) {
+            sort = SortType.UPDATED_DESC;
+        }
+        
+        // 如果是默认的更新时间降序排序，直接使用数据库的排序结果
+        // 数据库已经按照 ORDER BY is_pinned DESC, updated_at DESC, id ASC 排序
+        if (sort == SortType.UPDATED_DESC) {
+            return new ArrayList<>(list);
+        }
+        
+        // 如果是更新时间升序排序，反转数据库的降序结果
+        if (sort == SortType.UPDATED_ASC) {
+            List<Notebook> result = new ArrayList<>(list);
+            // 分别反转置顶和非置顶的部分
+            List<Notebook> pinnedList = new ArrayList<>();
+            List<Notebook> unpinnedList = new ArrayList<>();
+            
+            for (Notebook notebook : result) {
+                if (notebook.isPinned()) {
+                    pinnedList.add(notebook);
+                } else {
+                    unpinnedList.add(notebook);
+                }
+            }
+            
+            // 反转各自的顺序
+            Collections.reverse(pinnedList);
+            Collections.reverse(unpinnedList);
+            
+            // 重新组合：置顶在前，非置顶在后
+            List<Notebook> finalResult = new ArrayList<>();
+            finalResult.addAll(pinnedList);
+            finalResult.addAll(unpinnedList);
+            
+            return finalResult;
+        }
+        
+        // 创建基础比较器：置顶优先
+        Comparator<Notebook> baseComparator = (a, b) -> {
+            if (a.isPinned() != b.isPinned()) {
+                return Boolean.compare(b.isPinned(), a.isPinned()); // 置顶在前
+            }
+            return 0;
+        };
+        
+        switch (sort) {
+            case TITLE_ASC:
+                list.sort(baseComparator
+                    .thenComparing(n -> n.getTitle() == null ? "" : n.getTitle(),
+                                   String.CASE_INSENSITIVE_ORDER)
+                    .thenComparingLong(Notebook::getId)); // 稳定兜底
+                break;
+            case TITLE_DESC:
+                list.sort(baseComparator
+                    .thenComparing((Notebook n) -> n.getTitle() == null ? "" : n.getTitle(),
+                                   String.CASE_INSENSITIVE_ORDER.reversed())
+                    .thenComparingLong(Notebook::getId));
+                break;
+            case CREATED_ASC:
+                list.sort(baseComparator
+                    .thenComparingLong(Notebook::getCreatedAt)
+                    .thenComparingLong(Notebook::getId));
+                break;
+            case CREATED_DESC:
+                list.sort(baseComparator
+                    .thenComparing(Comparator.comparingLong(Notebook::getCreatedAt).reversed())
+                    .thenComparingLong(Notebook::getId));
+                break;
+            case UPDATED_DESC:
+                // 直接使用数据库的默认排序 (ORDER BY is_pinned DESC, updated_at DESC, id ASC)
+                // 不需要额外排序
+                break;
+        }
+        
+        // 再次返回"新实例"，避免外部误改
+        return new ArrayList<>(list);
     }
     
     /**
@@ -175,22 +228,10 @@ public class MainViewModel extends BaseViewModel {
     }
     
     /**
-     * 设置筛选颜色
-     */
-    public void setFilterColor(String color) {
-        if ((color == null && _filterColor.getValue() != null) || 
-            (color != null && !color.equals(_filterColor.getValue()))) {
-            _filterColor.setValue(color);
-            Log.d(TAG, "Filter color changed: " + color);
-        }
-    }
-    
-    /**
      * 清除筛选
      */
     public void clearFilters() {
         _searchQuery.setValue("");
-        _filterColor.setValue(null);
         Log.d(TAG, "Filters cleared");
     }
     
@@ -268,17 +309,64 @@ public class MainViewModel extends BaseViewModel {
      * 删除笔记本
      */
     public void deleteNotebook(long id) {
-        setLoading(true);
+        setRefreshing(true);
         
         notebookRepository.deleteNotebook(id, new NotebookRepository.RepositoryCallback<Void>() {
             @Override
             public void onSuccess(Void result) {
                 handleRepositoryCallback(result, null, "笔记本已删除");
+                setRefreshing(false);   // ✅ 必须显式关
+                refresh();              // （可选）触发一次 UI 刷新
             }
             
             @Override
             public void onError(Exception error) {
                 handleRepositoryCallback(null, error);
+                setRefreshing(false);   // ✅ 失败也要关
+            }
+        });
+    }
+    
+    /**
+     * 置顶笔记本
+     */
+    public void pinNotebook(long id) {
+        setRefreshing(true);
+        
+        notebookRepository.pinNotebook(id, new NotebookRepository.RepositoryCallback<Void>() {
+            @Override
+            public void onSuccess(Void result) {
+                handleRepositoryCallback(result, null, "笔记本已置顶");
+                setRefreshing(false);   // ✅
+                refresh();              // ✅
+            }
+            
+            @Override
+            public void onError(Exception error) {
+                handleRepositoryCallback(null, error);
+                setRefreshing(false);   // ✅
+            }
+        });
+    }
+    
+    /**
+     * 取消置顶笔记本
+     */
+    public void unpinNotebook(long id) {
+        setRefreshing(true);
+        
+        notebookRepository.unpinNotebook(id, new NotebookRepository.RepositoryCallback<Void>() {
+            @Override
+            public void onSuccess(Void result) {
+                handleRepositoryCallback(result, null, "已取消置顶");
+                setRefreshing(false);   // ✅
+                refresh();              // ✅
+            }
+            
+            @Override
+            public void onError(Exception error) {
+                handleRepositoryCallback(null, error);
+                setRefreshing(false);   // ✅
             }
         });
     }
@@ -320,12 +408,7 @@ public class MainViewModel extends BaseViewModel {
         return _sortType.getValue();
     }
     
-    /**
-     * 获取当前筛选颜色
-     */
-    public String getCurrentFilterColor() {
-        return _filterColor.getValue();
-    }
+
     
     /**
      * 获取当前布局模式
@@ -339,9 +422,7 @@ public class MainViewModel extends BaseViewModel {
      */
     public boolean hasFilters() {
         String query = _searchQuery.getValue();
-        String color = _filterColor.getValue();
-        return (query != null && !query.trim().isEmpty()) || 
-               (color != null && !color.trim().isEmpty());
+        return (query != null && !query.trim().isEmpty());
     }
     
     @Override
@@ -353,8 +434,13 @@ public class MainViewModel extends BaseViewModel {
     @Override
     protected void onRefresh() {
         Log.d(TAG, "Refreshing main data");
-        // 主页数据通过LiveData自动刷新，这里只需要结束刷新状态
-        setRefreshing(false);
+        
+        // 由于getAllNotebooks返回LiveData，数据会自动更新
+        // 这里只需要模拟刷新延迟然后停止刷新状态
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            setRefreshing(false);
+            Log.d(TAG, "Refresh completed");
+        }, 1000); // 1秒后停止刷新动画
     }
     
     /**

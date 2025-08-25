@@ -55,15 +55,15 @@ public interface NotebookDao {
     Notebook getByIdSync(long id);
     
     /**
-     * 获取所有未删除的笔记本（按更新时间倒序）
+     * 获取所有未删除的笔记本（Room层稳定排序：置顶优先，然后按更新时间降序，最后按ID升序兜底）
      */
-    @Query("SELECT * FROM notebooks WHERE is_deleted = 0 ORDER BY updated_at DESC")
+    @Query("SELECT * FROM notebooks WHERE is_deleted = 0 ORDER BY is_pinned DESC, updated_at DESC, id ASC")
     LiveData<List<Notebook>> getAllNotebooks();
     
     /**
-     * 获取所有未删除的笔记本（同步，按更新时间倒序）
+     * 获取所有未删除的笔记本（同步，Room层稳定排序：置顶优先，然后按更新时间降序，最后按ID升序兜底）
      */
-    @Query("SELECT * FROM notebooks WHERE is_deleted = 0 ORDER BY updated_at DESC")
+    @Query("SELECT * FROM notebooks WHERE is_deleted = 0 ORDER BY is_pinned DESC, updated_at DESC, id ASC")
     List<Notebook> getAllNotebooksSync();
     
     /**
@@ -107,6 +107,18 @@ public interface NotebookDao {
      */
     @Query("UPDATE notebooks SET is_deleted = 0, deleted_at = NULL, updated_at = :updatedAt WHERE id = :id")
     int restore(long id, long updatedAt);
+    
+    /**
+     * 置顶笔记本
+     */
+    @Query("UPDATE notebooks SET is_pinned = 1, pinned_at = :pinnedAt WHERE id = :id")
+    int pin(long id, long pinnedAt);
+    
+    /**
+     * 取消置顶笔记本
+     */
+    @Query("UPDATE notebooks SET is_pinned = 0, pinned_at = NULL WHERE id = :id")
+    int unpin(long id);
     
     /**
      * 物理删除回收站中的笔记本

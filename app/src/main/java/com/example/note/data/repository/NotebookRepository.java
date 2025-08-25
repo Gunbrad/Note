@@ -1,6 +1,8 @@
 package com.example.note.data.repository;
 
 import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import androidx.lifecycle.LiveData;
@@ -28,6 +30,7 @@ public class NotebookRepository {
     
     private final NotebookDao notebookDao;
     private final Executor executor;
+    private final Handler mainHandler;
     
     // LiveData缓存
     private final LiveData<List<Notebook>> allNotebooks;
@@ -38,6 +41,7 @@ public class NotebookRepository {
         AppDatabase database = AppDatabase.getInstance(context);
         notebookDao = database.notebookDao();
         executor = Executors.newFixedThreadPool(4);
+        mainHandler = new Handler(Looper.getMainLooper());
         
         // 初始化LiveData
         allNotebooks = notebookDao.getAllNotebooks();
@@ -95,6 +99,24 @@ public class NotebookRepository {
             return allNotebooks;
         }
         return notebookDao.searchNotebooks(query.trim());
+    }
+    
+    /**
+     * 将成功回调投递到主线程
+     */
+    private <T> void deliverSuccess(RepositoryCallback<T> callback, T result) {
+        if (callback != null) {
+            mainHandler.post(() -> callback.onSuccess(result));
+        }
+    }
+    
+    /**
+     * 将错误回调投递到主线程
+     */
+    private <T> void deliverError(RepositoryCallback<T> callback, Exception error) {
+        if (callback != null) {
+            mainHandler.post(() -> callback.onError(error));
+        }
     }
     
     /**
@@ -270,20 +292,14 @@ public class NotebookRepository {
                 int result = notebookDao.softDelete(id, now, now);
                 
                 if (result > 0) {
-                    if (callback != null) {
-                        callback.onSuccess(null);
-                    }
+                    deliverSuccess(callback, null);
                     Log.d(TAG, "Notebook deleted: " + id);
                 } else {
-                    if (callback != null) {
-                        callback.onError(new RuntimeException("删除失败"));
-                    }
+                    deliverError(callback, new RuntimeException("删除失败"));
                 }
             } catch (Exception e) {
                 Log.e(TAG, "Failed to delete notebook: " + id, e);
-                if (callback != null) {
-                    callback.onError(e);
-                }
+                deliverError(callback, e);
             }
         });
     }
@@ -311,6 +327,49 @@ public class NotebookRepository {
                 if (callback != null) {
                     callback.onError(e);
                 }
+            }
+        });
+    }
+    
+    /**
+     * 置顶笔记本
+     */
+    public void pinNotebook(long id, RepositoryCallback<Void> callback) {
+        executor.execute(() -> {
+            try {
+                long now = DateUtils.now();
+                int result = notebookDao.pin(id, now);
+                
+                if (result > 0) {
+                    deliverSuccess(callback, null);
+                    Log.d(TAG, "Notebook pinned: " + id);
+                } else {
+                    deliverError(callback, new RuntimeException("置顶失败"));
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to pin notebook: " + id, e);
+                deliverError(callback, e);
+            }
+        });
+    }
+    
+    /**
+     * 取消置顶笔记本
+     */
+    public void unpinNotebook(long id, RepositoryCallback<Void> callback) {
+        executor.execute(() -> {
+            try {
+                int result = notebookDao.unpin(id);
+                
+                if (result > 0) {
+                    deliverSuccess(callback, null);
+                    Log.d(TAG, "Notebook unpinned: " + id);
+                } else {
+                    deliverError(callback, new RuntimeException("取消置顶失败"));
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to unpin notebook: " + id, e);
+                deliverError(callback, e);
             }
         });
     }

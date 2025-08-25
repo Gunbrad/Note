@@ -9,6 +9,7 @@ import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -24,6 +25,7 @@ import com.example.note.data.entity.Column;
 import com.example.note.data.model.FilterOption;
 import com.example.note.ui.note.LocalFilterDialog;
 import com.example.note.ui.note.NoteViewModel;
+import com.example.note.ui.note.ColumnWidthProvider;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,8 +34,61 @@ import android.app.Activity;
 
 /**
  * 列头适配器 - 显示列名、排序、筛选和拖拽调整列宽功能
+ * 使用ColumnWidthProvider提供基于缩放的动态尺寸
  */
 public class ColumnHeaderAdapter extends RecyclerView.Adapter<ColumnHeaderAdapter.ColumnHeaderViewHolder> {
+    
+    // 默认列宽常量
+    private static final float DEFAULT_COLUMN_WIDTH_PX = 120f;
+    
+    // 列宽调整的最小和最大值
+    private static final int MIN_COLUMN_WIDTH_DP = 50;
+    private static final int MAX_COLUMN_WIDTH_DP = 600;
+    
+    // 工具方法
+    private static int dpToPx(View v, float dp) {
+        float density = v.getContext().getResources().getDisplayMetrics().density;
+        return Math.round(dp * density);
+    }
+    
+    private static float clamp(float v, float min, float max) {
+        return Math.max(min, Math.min(max, v));
+    }
+    
+    // 新增：简化版 dp 转 px（无需依赖某个 View 实例）
+    private int dpToPx(float dp) {
+        float density = (context != null)
+                ? context.getResources().getDisplayMetrics().density
+                : 3f; // 兜底
+        return Math.round(dp * density);
+    }
+    
+    // 新增：确保缓存尺寸 & 首次填充
+    private void ensureWidthCache() {
+        int n = getItemCount();
+        if (widthCachePx == null || widthCachePx.length != n) {
+            widthCachePx = new int[n];
+            for (int i = 0; i < n; i++) {
+                // 以 Provider 为准初始化；没有则用列自身或默认
+                if (widthProvider != null) {
+                    widthCachePx[i] = widthProvider.getColumnWidthPx(i);
+                } else if (columns != null && i < columns.size()) {
+                    widthCachePx[i] = Math.max(dpToPx(MIN_COLUMN_WIDTH_DP), 
+                            dpToPx(columns.get(i).getWidth() > 0 ? columns.get(i).getWidth() : DEFAULT_COLUMN_WIDTH_PX));
+                } else {
+                    widthCachePx[i] = dpToPx(DEFAULT_COLUMN_WIDTH_PX);
+                }
+            }
+        }
+    }
+    
+    /**
+     * 清除宽度缓存，强制在下次bind时重新计算宽度
+     * 用于缩放变化时确保使用最新的缩放因子
+     */
+    public void clearWidthCache() {
+        widthCachePx = null;
+    }
     
     // 排序状态枚举
     public enum SortState {
@@ -44,14 +99,17 @@ public class ColumnHeaderAdapter extends RecyclerView.Adapter<ColumnHeaderAdapte
     
     private List<Column> columns;
     private OnColumnResizeListener resizeListener;
+    private OnColumnRealtimeUpdateListener realtimeUpdateListener;
     private OnColumnNameChangeListener nameChangeListener;
     private OnColumnSortListener sortListener;
     private OnColumnFilterListener filterListener;
+    private OnColumnLongClickListener longClickListener;
     private Handler saveHandler = new Handler(Looper.getMainLooper());
     private Runnable saveRunnable;
     private android.content.Context context;
     private NoteViewModel noteViewModel;
     private long currentNotebookId;
+    private ColumnWidthProvider widthProvider;
     
     // 排序状态跟踪
     private SortState[] sortStates;
@@ -60,8 +118,15 @@ public class ColumnHeaderAdapter extends RecyclerView.Adapter<ColumnHeaderAdapte
     // 筛选状态跟踪
     private boolean[] filterStates;
     
+    // 新增：像素宽度缓存（与 columns 同步长度）
+    private int[] widthCachePx;
+    
     public interface OnColumnResizeListener {
-        void onColumnResize(int columnIndex, float newWidth);
+        void onColumnResize(int columnIndex, float newWidth, boolean isFinal);
+    }
+    
+    public interface OnColumnRealtimeUpdateListener {
+        void onColumnRealtimeUpdate(int columnIndex, int newWidthPx);
     }
     
     public interface OnColumnNameChangeListener {
@@ -76,6 +141,10 @@ public class ColumnHeaderAdapter extends RecyclerView.Adapter<ColumnHeaderAdapte
         void onColumnFilter(int columnIndex, String filterType, Object filterValue);
         void onColumnFilterClear(int columnIndex);
         void onColumnFilterApplied(int columnIndex, Set<String> selectedValues);
+    }
+    
+    public interface OnColumnLongClickListener {
+        void onColumnLongClick(int columnIndex);
     }
     
     public ColumnHeaderAdapter(List<Column> columns) {
@@ -101,6 +170,13 @@ public class ColumnHeaderAdapter extends RecyclerView.Adapter<ColumnHeaderAdapte
     
     public void setCurrentNotebookId(long notebookId) {
         this.currentNotebookId = notebookId;
+    }
+    
+    public void setColumnWidthProvider(ColumnWidthProvider widthProvider) {
+        this.widthProvider = widthProvider;
+        // Provider 变更后重建缓存
+        widthCachePx = null;
+        ensureWidthCache();
     }
     
     private List<String> getColumnValues(int columnIndex) {
@@ -147,6 +223,14 @@ public class ColumnHeaderAdapter extends RecyclerView.Adapter<ColumnHeaderAdapte
     
     public void setOnColumnFilterListener(OnColumnFilterListener listener) {
         this.filterListener = listener;
+    }
+    
+    public void setOnColumnLongClickListener(OnColumnLongClickListener listener) {
+        this.longClickListener = listener;
+    }
+    
+    public void setOnColumnRealtimeUpdateListener(OnColumnRealtimeUpdateListener listener) {
+        this.realtimeUpdateListener = listener;
     }
     
     @NonNull
@@ -196,6 +280,10 @@ public class ColumnHeaderAdapter extends RecyclerView.Adapter<ColumnHeaderAdapte
             filterStates[i] = false;
         }
         
+        // 关键：列集合变化后重建像素缓存
+        widthCachePx = null;
+        ensureWidthCache();
+        
         notifyDataSetChanged();
     }
     
@@ -205,12 +293,13 @@ public class ColumnHeaderAdapter extends RecyclerView.Adapter<ColumnHeaderAdapte
         private ImageView filterButton;
         private View filterIndicator;
         private View resizeHandle;
+        private View columnRoot; // 新增：可调宽度的根容器
         private float startX;
         private float startWidth;
         private TextWatcher textWatcher;
         private String originalName;
         private boolean isEditing = false;
-        
+
         public ColumnHeaderViewHolder(@NonNull View itemView) {
             super(itemView);
             columnTitle = itemView.findViewById(R.id.column_name_edit);
@@ -218,6 +307,7 @@ public class ColumnHeaderAdapter extends RecyclerView.Adapter<ColumnHeaderAdapte
             filterButton = itemView.findViewById(R.id.filter_button);
             filterIndicator = itemView.findViewById(R.id.filter_indicator);
             resizeHandle = itemView.findViewById(R.id.column_resize_handle);
+            columnRoot = itemView.findViewById(R.id.column_root); // 获取可调宽度的根容器
             
             if (columnTitle == null) {
                 // 如果布局中没有EditText，创建一个
@@ -238,13 +328,35 @@ public class ColumnHeaderAdapter extends RecyclerView.Adapter<ColumnHeaderAdapte
             // 保存原始名称
             originalName = column.getName();
             
-            // 显示列名（不触发TextWatcher）
-            columnTitle.setText(column.getName());
+            // 显示列名（不触发TextWatcher），只在内容真正改变且不在编辑状态时才更新
+            String columnName = column.getName();
+            String currentText = columnTitle.getText().toString();
             
-            // 设置列宽 - 与单元格保持一致
-            ViewGroup.LayoutParams layoutParams = itemView.getLayoutParams();
-            layoutParams.width = (int) (column.getWidth() * itemView.getContext().getResources().getDisplayMetrics().density);
-            itemView.setLayoutParams(layoutParams);
+            if (!columnName.equals(currentText) && !isEditing) {
+                columnTitle.setText(columnName);
+            }
+            
+            // 改：同时设置外层itemView和内层columnRoot的宽度，确保列头整体宽度正确
+            ensureWidthCache(); // 确保缓存已初始化
+            int targetWidth = (widthCachePx != null && position < widthCachePx.length && widthCachePx[position] > 0)
+                    ? widthCachePx[position]
+                    : (widthProvider != null ? widthProvider.getColumnWidthPx(position) : dpToPx(DEFAULT_COLUMN_WIDTH_PX));
+            
+            // 设置外层itemView的宽度
+            ViewGroup.LayoutParams itemLayoutParams = itemView.getLayoutParams();
+            if (itemLayoutParams != null) {
+                itemLayoutParams.width = targetWidth;
+                itemLayoutParams.height = (widthProvider != null) ? widthProvider.getRowHeightPx() : itemLayoutParams.height;
+                itemView.setLayoutParams(itemLayoutParams);
+            }
+            
+            // 设置内层columnRoot的宽度
+            if (columnRoot != null) {
+                ViewGroup.LayoutParams columnLayoutParams = columnRoot.getLayoutParams();
+                columnLayoutParams.width = targetWidth;
+                columnLayoutParams.height = ViewGroup.LayoutParams.MATCH_PARENT;
+                columnRoot.setLayoutParams(columnLayoutParams);
+            }
             
             // 设置焦点变化监听器 - 只在失去焦点时保存
             columnTitle.setOnFocusChangeListener(new View.OnFocusChangeListener() {
@@ -490,55 +602,230 @@ public class ColumnHeaderAdapter extends RecyclerView.Adapter<ColumnHeaderAdapte
     }
         
         private void saveColumnName(int position) {
-            String newName = columnTitle.getText().toString().trim();
-            if (!newName.equals(originalName) && nameChangeListener != null && !newName.isEmpty()) {
-                nameChangeListener.onColumnNameChange(position, newName);
-                originalName = newName; // 更新原始名称
+        String newName = columnTitle.getText().toString().trim();
+        if (!newName.equals(originalName) && nameChangeListener != null && !newName.isEmpty()) {
+            nameChangeListener.onColumnNameChange(position, newName);
+            originalName = newName; // 更新原始名称
+        }
+    }
+    
+    }
+    
+    /**
+     * 强制保存所有正在编辑的列头名称
+     */
+    public void forceFinishAllEditing() {
+        // 遍历所有ViewHolder，保存正在编辑的列头
+        for (int i = 0; i < getItemCount(); i++) {
+            RecyclerView recyclerView = null;
+            // 尝试从context获取RecyclerView
+            if (context instanceof android.app.Activity) {
+                android.app.Activity activity = (android.app.Activity) context;
+                recyclerView = activity.findViewById(R.id.column_headers_recycler);
+            }
+            
+            if (recyclerView != null) {
+                ColumnHeaderViewHolder holder = (ColumnHeaderViewHolder) recyclerView.findViewHolderForAdapterPosition(i);
+                if (holder != null && holder.isEditing) {
+                    holder.saveColumnName(i);
+                    holder.isEditing = false;
+                    holder.columnTitle.clearFocus();
+                }
             }
         }
     }
     
-    // 设置拖拽手柄的触摸监听器
+    // 设置拖拽手柄的触摸监听器（按修改建议3重构版）
     private void setupResizeHandle(ColumnHeaderViewHolder holder, int position) {
-        if (holder.resizeHandle != null) {
-            holder.resizeHandle.setOnTouchListener(new View.OnTouchListener() {
-                @Override
-                public boolean onTouch(View v, MotionEvent event) {
-                    switch (event.getAction()) {
-                        case MotionEvent.ACTION_DOWN:
-                            holder.startX = event.getRawX();
-                            holder.startWidth = holder.itemView.getLayoutParams().width;
-                            return true;
-                            
-                        case MotionEvent.ACTION_MOVE:
-                            float deltaX = event.getRawX() - holder.startX;
-                            float newWidth = Math.max(80, holder.startWidth + deltaX); // 最小宽度80dp
-                            
-                            // 实时更新列宽
-                            ViewGroup.LayoutParams params = holder.itemView.getLayoutParams();
-                            params.width = (int) newWidth;
-                            holder.itemView.setLayoutParams(params);
-                            
-                            // 通知监听器
-                            if (resizeListener != null) {
-                                float widthInDp = newWidth / holder.itemView.getContext().getResources().getDisplayMetrics().density;
-                                resizeListener.onColumnResize(position, widthInDp);
+        final int minWidthPx = dpToPx(holder.itemView, MIN_COLUMN_WIDTH_DP);
+        final int maxWidthPx = dpToPx(holder.itemView, MAX_COLUMN_WIDTH_DP);
+        final android.view.ViewConfiguration vc =
+                android.view.ViewConfiguration.get(holder.itemView.getContext());
+        final int touchSlop = vc.getScaledTouchSlop();
+
+        holder.resizeHandle.setOnTouchListener(new View.OnTouchListener() {
+            private float downRawX;
+            private float startWidthPx;
+            private boolean dragging = false;
+            private long lastFrameTime = 0L;
+            private RecyclerView recyclerView;
+
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN: {
+                        downRawX = event.getRawX();
+                        
+                        // ✅ 修改建议：使用缓存宽度作为起点，而不是widthProvider
+                        ensureWidthCache();
+                        startWidthPx = (widthCachePx != null && position < widthCachePx.length && widthCachePx[position] > 0)
+                                ? widthCachePx[position]
+                                : (holder.columnRoot != null ? holder.columnRoot.getWidth() : holder.itemView.getWidth());
+
+                        // 获取RecyclerView引用，用于suppressLayout
+                        View parent = holder.itemView;
+                        while (parent != null && !(parent instanceof RecyclerView)) {
+                            if (parent.getParent() instanceof View) {
+                                parent = (View) parent.getParent();
+                            } else {
+                                break;
                             }
-                            return true;
-                            
-                        case MotionEvent.ACTION_UP:
-                        case MotionEvent.ACTION_CANCEL:
-                            return true;
+                        }
+                        recyclerView = (parent instanceof RecyclerView) ? (RecyclerView) parent : null;
+
+                        // 强制不要被父级拦截（水平滚动冲突）
+                        ViewParent viewParent = v.getParent();
+                        if (viewParent != null) viewParent.requestDisallowInterceptTouchEvent(true);
+                        if (android.os.Build.VERSION.SDK_INT >= 26) {
+                            v.requestPointerCapture();
+                        }
+                        // 触感反馈（可选）
+                        v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+                        return true;
                     }
-                    return false;
+                    case MotionEvent.ACTION_MOVE: {
+                        float dx = event.getRawX() - downRawX;
+
+                        if (!dragging && Math.abs(dx) < touchSlop) {
+                            // 未超过触发阈值前，不做视觉更新，防抖
+                            return true;
+                        }
+                        
+                        if (!dragging) {
+                            dragging = true;
+                            // ✅ 修改建议：开始拖拽时抑制RecyclerView布局更新
+                            if (recyclerView != null) {
+                                recyclerView.suppressLayout(true);
+                            }
+                        }
+
+                        // 计算新宽度（可放大可缩小）
+                        float desiredPxF = clamp(startWidthPx + dx, minWidthPx, maxWidthPx);
+                        int desiredPx = (int) desiredPxF;
+
+                        // 简单限帧（~60fps）
+                        long now = System.currentTimeMillis();
+                        if (now - lastFrameTime < 16) return true;
+                        lastFrameTime = now;
+
+                        // ✅ 先更新缓存
+                        ensureWidthCache();
+                        if (position < getItemCount()) {
+                            widthCachePx[position] = desiredPx;
+                        }
+
+                        // ✅ 修改建议：同时更新外层itemView和内层columnRoot的宽度
+                        // 设置外层itemView的宽度
+                        ViewGroup.LayoutParams itemLp = holder.itemView.getLayoutParams();
+                        if (itemLp != null && itemLp.width != desiredPx) {
+                            itemLp.width = desiredPx;
+                            holder.itemView.setLayoutParams(itemLp);
+                            holder.itemView.requestLayout();
+                        }
+                        
+                        // 设置内层columnRoot的宽度
+                        if (holder.columnRoot != null) {
+                            ViewGroup.LayoutParams columnLp = holder.columnRoot.getLayoutParams();
+                            if (columnLp.width != desiredPx) {
+                                columnLp.width = desiredPx;
+                                holder.columnRoot.setLayoutParams(columnLp);
+                                holder.columnRoot.requestLayout();
+                            }
+                        }
+
+                        // ✅ 修改建议：只调用实时更新监听器，不写入widthProvider
+                        if (realtimeUpdateListener != null) {
+                            realtimeUpdateListener.onColumnRealtimeUpdate(position, desiredPx);
+                        }
+                        
+                        return true;
+                    }
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL: {
+                        // 结束拖拽时，做一次最终收尾与持久化
+                        float dx = event.getRawX() - downRawX;
+                        int finalWidthPx = (int) clamp(startWidthPx + dx, minWidthPx, maxWidthPx);
+
+                        // ✅ 最终同步一次缓存与 UI
+                        ensureWidthCache();
+                        if (position < getItemCount()) {
+                            widthCachePx[position] = finalWidthPx;
+                        }
+                        
+                        // ✅ 修改建议：同时设置外层itemView和内层columnRoot的最终宽度
+                        // 设置外层itemView的最终宽度
+                        ViewGroup.LayoutParams itemLp = holder.itemView.getLayoutParams();
+                        if (itemLp != null) {
+                            itemLp.width = finalWidthPx;
+                            holder.itemView.setLayoutParams(itemLp);
+                            holder.itemView.requestLayout();
+                        }
+                        
+                        // 设置内层columnRoot的最终宽度
+                        if (holder.columnRoot != null) {
+                            ViewGroup.LayoutParams columnLp = holder.columnRoot.getLayoutParams();
+                            columnLp.width = finalWidthPx;
+                            holder.columnRoot.setLayoutParams(columnLp);
+                            holder.columnRoot.requestLayout();
+                        }
+
+                        // ✅ 恢复RecyclerView布局更新
+                        if (recyclerView != null) {
+                            recyclerView.suppressLayout(false);
+                        }
+
+                        // ✅ 拖拽结束时统一处理Provider更新、数据库更新和表体同步
+                        if (resizeListener != null) {
+                            // 转换为DP值传递给监听器
+                            // 注意：不要除以scale，因为Column.getWidth()存储的就是基础dp值
+                            // 而widthProvider.getColumnWidthPx()已经乘以了scale
+                            float density = holder.itemView.getContext().getResources()
+                                    .getDisplayMetrics().density;
+                            float finalWidthDp = finalWidthPx / density;
+                            
+                            // 调用监听器进行最终的Provider更新、数据库更新和表体同步
+                            resizeListener.onColumnResize(position, finalWidthDp, true);
+                        }
+
+                        if (android.os.Build.VERSION.SDK_INT >= 26) {
+                            v.releasePointerCapture();
+                        }
+                        ViewParent viewParent = v.getParent();
+                        if (viewParent != null) viewParent.requestDisallowInterceptTouchEvent(false);
+                        
+                        dragging = false;
+                        return true;
+                    }
                 }
-            });
-        }
+                return false;
+            }
+        });
         
-        // 清除其他点击监听器
-        holder.columnTitle.setOnClickListener(null);
-        holder.columnTitle.setOnLongClickListener(null);
+        // 设置列头点击事件：点击进入编辑模式
+        holder.columnTitle.setOnClickListener(v -> {
+            holder.columnTitle.requestFocus();
+            holder.columnTitle.selectAll();
+        });
+        
+        // 设置列头长按事件：弹出删除菜单
+        holder.columnTitle.setOnLongClickListener(v -> {
+            if (longClickListener != null) {
+                longClickListener.onColumnLongClick(position);
+                return true;
+            }
+            return false;
+        });
+        
+        // 设置整个列头区域的长按事件（作为备选）
+        holder.itemView.setOnLongClickListener(v -> {
+            if (longClickListener != null) {
+                longClickListener.onColumnLongClick(position);
+                return true;
+            }
+            return false;
+        });
+        
+        // 清除itemView的点击监听器，避免与EditText冲突
         holder.itemView.setOnClickListener(null);
-        holder.itemView.setOnLongClickListener(null);
     }
 }

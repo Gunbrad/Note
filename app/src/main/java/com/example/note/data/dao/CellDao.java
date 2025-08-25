@@ -31,6 +31,66 @@ public interface CellDao {
     List<Long> insertAll(List<Cell> cells);
     
     /**
+     * 使用复合键UPSERT单个单元格（兼容版本）
+     */
+    @Query("INSERT OR REPLACE INTO cells (" +
+           "  id, notebook_id, row_index, col_index, " +
+           "  content, text_color, background_color, " +
+           "  is_bold, is_italic, text_size, text_alignment, image_id, " +
+           "  updated_at, created_at" +
+           ") VALUES (" +
+           "  (SELECT id FROM cells WHERE notebook_id=:notebookId AND row_index=:rowIndex AND col_index=:colIndex)," +
+           "  :notebookId, :rowIndex, :colIndex," +
+           "  :content, :textColor, :backgroundColor, :isBold, :isItalic, :textSize, :textAlignment, :imageId," +
+           "  :updatedAt," +
+           "  COALESCE((SELECT created_at FROM cells WHERE notebook_id=:notebookId AND row_index=:rowIndex AND col_index=:colIndex), :createdAt)" +
+           ")")
+    void upsertCell(long notebookId, int rowIndex, int colIndex, String content, String textColor, String backgroundColor, boolean isBold, boolean isItalic, float textSize, String textAlignment, String imageId, long updatedAt, long createdAt);
+    
+    /**
+     * 使用复合键UPSERT单元格内容（兼容版本）
+     */
+    @Query("INSERT OR REPLACE INTO cells (" +
+           "  id, notebook_id, row_index, col_index, " +
+           "  content, text_color, background_color, " +
+           "  is_bold, is_italic, text_size, text_alignment, image_id, " +
+           "  updated_at, created_at" +
+           ") VALUES (" +
+           "  (SELECT id FROM cells WHERE notebook_id=:notebookId AND row_index=:rowIndex AND col_index=:colIndex)," +
+           "  :notebookId, :rowIndex, :colIndex," +
+           "  :content," +
+           "  COALESCE((SELECT text_color       FROM cells WHERE notebook_id=:notebookId AND row_index=:rowIndex AND col_index=:colIndex), '')," +
+           "  COALESCE((SELECT background_color FROM cells WHERE notebook_id=:notebookId AND row_index=:rowIndex AND col_index=:colIndex), '')," +
+           "  COALESCE((SELECT is_bold          FROM cells WHERE notebook_id=:notebookId AND row_index=:rowIndex AND col_index=:colIndex), 0)," +
+           "  COALESCE((SELECT is_italic        FROM cells WHERE notebook_id=:notebookId AND row_index=:rowIndex AND col_index=:colIndex), 0)," +
+           "  COALESCE((SELECT text_size        FROM cells WHERE notebook_id=:notebookId AND row_index=:rowIndex AND col_index=:colIndex), 14)," +
+           "  COALESCE((SELECT text_alignment   FROM cells WHERE notebook_id=:notebookId AND row_index=:rowIndex AND col_index=:colIndex), 'LEFT')," +
+           "  COALESCE((SELECT image_id         FROM cells WHERE notebook_id=:notebookId AND row_index=:rowIndex AND col_index=:colIndex), NULL)," +
+           "  :updatedAt," +
+           "  COALESCE((SELECT created_at       FROM cells WHERE notebook_id=:notebookId AND row_index=:rowIndex AND col_index=:colIndex), :createdAt)" +
+           ")")
+    void upsertCellContent(long notebookId, int rowIndex, int colIndex, String content, long updatedAt, long createdAt);
+    
+    /**
+     * 使用复合键UPSERT单元格格式（兼容版本）
+     */
+    @Query("INSERT OR REPLACE INTO cells (" +
+           "  id, notebook_id, row_index, col_index, " +
+           "  content, text_color, background_color, " +
+           "  is_bold, is_italic, text_size, text_alignment, image_id, " +
+           "  updated_at, created_at" +
+           ") VALUES (" +
+           "  (SELECT id FROM cells WHERE notebook_id=:notebookId AND row_index=:rowIndex AND col_index=:colIndex)," +
+           "  :notebookId, :rowIndex, :colIndex," +
+           "  COALESCE((SELECT content          FROM cells WHERE notebook_id=:notebookId AND row_index=:rowIndex AND col_index=:colIndex), '')," +
+           "  :textColor, :backgroundColor, :isBold, :isItalic, :textSize, :textAlignment," +
+           "  COALESCE((SELECT image_id         FROM cells WHERE notebook_id=:notebookId AND row_index=:rowIndex AND col_index=:colIndex), NULL)," +
+           "  :updatedAt," +
+           "  COALESCE((SELECT created_at       FROM cells WHERE notebook_id=:notebookId AND row_index=:rowIndex AND col_index=:colIndex), :createdAt)" +
+           ")")
+    void upsertCellFormat(long notebookId, int rowIndex, int colIndex, String textColor, String backgroundColor, boolean isBold, boolean isItalic, float textSize, String textAlignment, long updatedAt, long createdAt);
+    
+    /**
      * 更新单元格
      */
     @Update

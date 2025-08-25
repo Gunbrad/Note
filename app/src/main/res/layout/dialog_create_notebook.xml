@@ -41,14 +41,6 @@
 
     </com.google.android.material.textfield.TextInputLayout>
 
-    <!-- 提示信息 -->
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="💡 下一步将选择模板来创建表格结构"
-        android:textColor="?attr/colorPrimary"
-        android:textSize="12sp"
-        android:gravity="center" />
+
 
 </LinearLayout>

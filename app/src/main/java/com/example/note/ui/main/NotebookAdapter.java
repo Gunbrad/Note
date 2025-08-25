@@ -1,11 +1,14 @@
 package com.example.note.ui.main;
 
 import android.content.Context;
+
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.TextView;
+import android.widget.PopupMenu;
+import android.view.MenuItem;
 
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.DiffUtil;
@@ -15,8 +18,15 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.example.note.R;
 import com.example.note.data.entity.Notebook;
 import com.example.note.util.ColorUtils;
-import com.example.note.util.DateUtils;
+
+import com.example.note.data.dao.CellDao;
+import com.example.note.data.dao.ColumnDao;
+import com.example.note.data.database.AppDatabase;
+
+import java.util.Objects;
 import com.google.android.material.card.MaterialCardView;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * 笔记本适配器
@@ -27,9 +37,23 @@ public class NotebookAdapter extends ListAdapter<Notebook, NotebookAdapter.Noteb
     
     private OnItemClickListener onItemClickListener;
     private OnItemLongClickListener onItemLongClickListener;
-    
-    public NotebookAdapter() {
+    private OnMenuActionListener onMenuActionListener;
+    private CellDao cellDao;
+    private ColumnDao columnDao;
+    private ExecutorService executor;
+
+    public NotebookAdapter(Context context) {
         super(DIFF_CALLBACK);
+        setHasStableIds(true);
+        AppDatabase database = AppDatabase.getInstance(context);
+        this.cellDao = database.cellDao();
+        this.columnDao = database.columnDao();
+        this.executor = Executors.newCachedThreadPool();
+    }
+    
+    @Override
+    public long getItemId(int position) {
+        return getItem(position).getId();
     }
     
     // 接口定义
@@ -41,6 +65,11 @@ public class NotebookAdapter extends ListAdapter<Notebook, NotebookAdapter.Noteb
         void onItemLongClick(Notebook notebook);
     }
     
+    public interface OnMenuActionListener {
+        void onDeleteNotebook(Notebook notebook);
+        void onPinNotebook(Notebook notebook);
+    }
+    
     // Setter方法
     public void setOnItemClickListener(OnItemClickListener listener) {
         this.onItemClickListener = listener;
@@ -48,6 +77,10 @@ public class NotebookAdapter extends ListAdapter<Notebook, NotebookAdapter.Noteb
     
     public void setOnItemLongClickListener(OnItemLongClickListener listener) {
         this.onItemLongClickListener = listener;
+    }
+    
+    public void setOnMenuActionListener(OnMenuActionListener listener) {
+        this.onMenuActionListener = listener;
     }
     
     @NonNull
@@ -72,23 +105,28 @@ public class NotebookAdapter extends ListAdapter<Notebook, NotebookAdapter.Noteb
         private final MaterialCardView cardView;
         private final View colorIndicator;
         private final ImageView statusIcon;
-        private final ImageView moreButton;
+        private final ImageView moreIcon;
         private final TextView titleText;
         private final TextView subtitleText;
-        private final TextView timeText;
+
         private final ImageView previewImage;
+        private final ImageView notebookIcon;
+        private final TextView dimensionsText;
         
         public NotebookViewHolder(@NonNull View itemView) {
             super(itemView);
-            
             cardView = (MaterialCardView) itemView;
-            colorIndicator = itemView.findViewById(R.id.color_indicator);
-            statusIcon = itemView.findViewById(R.id.status_icon);
-            moreButton = itemView.findViewById(R.id.more_icon);
             titleText = itemView.findViewById(R.id.title_text_view);
-            subtitleText = itemView.findViewById(R.id.subtitle_text_view);
-            timeText = itemView.findViewById(R.id.time_text_view);
-            previewImage = itemView.findViewById(R.id.preview_image);
+            statusIcon = itemView.findViewById(R.id.status_icon);
+
+            moreIcon = itemView.findViewById(R.id.more_icon);
+            notebookIcon = itemView.findViewById(R.id.notebook_icon);
+            dimensionsText = itemView.findViewById(R.id.dimensions_text_view);
+            
+            // 这些元素在新布局中不存在，设为null
+            colorIndicator = null;
+            subtitleText = null;
+            previewImage = null;
             
             // 设置点击监听器
             cardView.setOnClickListener(v -> {
@@ -113,12 +151,10 @@ public class NotebookAdapter extends ListAdapter<Notebook, NotebookAdapter.Noteb
             });
             
             // 更多按钮点击
-            moreButton.setOnClickListener(v -> {
-                if (onItemLongClickListener != null) {
-                    int position = getAdapterPosition();
-                    if (position != RecyclerView.NO_POSITION) {
-                        onItemLongClickListener.onItemLongClick(getItem(position));
-                    }
+            moreIcon.setOnClickListener(v -> {
+                int position = getAdapterPosition();
+                if (position != RecyclerView.NO_POSITION) {
+                    showPopupMenu(v, getItem(position));
                 }
             });
         }
@@ -132,25 +168,18 @@ public class NotebookAdapter extends ListAdapter<Notebook, NotebookAdapter.Noteb
             // 设置标题
             titleText.setText(notebook.getTitle());
             
-            // 设置副标题（TODO: 实现单元格数量统计）
-            if (notebook.getDescription() != null && !notebook.getDescription().trim().isEmpty()) {
-                subtitleText.setText(notebook.getDescription());
-                subtitleText.setVisibility(View.VISIBLE);
-            } else {
-                subtitleText.setText(context.getString(R.string.subtitle_empty));
-                subtitleText.setVisibility(View.VISIBLE);
-            }
-            
-            // 设置时间
-            timeText.setText(DateUtils.formatRelativeTime(notebook.getUpdatedAt()));
-            
-            // 设置颜色指示器
-            int color = ColorUtils.parseColor(notebook.getColor());
-            colorIndicator.setBackgroundColor(color);
+
             
             // 设置卡片背景色（淡化版本）
             int backgroundColor = ColorUtils.getBackgroundColor(notebook.getColor());
             cardView.setCardBackgroundColor(backgroundColor);
+            
+            // 设置笔记本图标
+            notebookIcon.setImageResource(R.drawable.ic_notebook_24);
+            notebookIcon.setVisibility(View.VISIBLE);
+            
+            // 异步获取并设置尺寸信息
+            loadNotebookDimensions(notebook.getId());
             
             // 隐藏状态图标（当前版本不支持置顶和归档）
             statusIcon.setVisibility(View.GONE);
@@ -174,8 +203,68 @@ public class NotebookAdapter extends ListAdapter<Notebook, NotebookAdapter.Noteb
                 cardView.setLayoutParams(params);
             });
             
-            // TODO: 设置预览缩略图
-            previewImage.setVisibility(View.GONE);
+            // 隐藏状态图标（在新布局中不需要显示）
+            statusIcon.setVisibility(View.GONE);
+        }
+        
+        /**
+         * 异步加载笔记本尺寸信息
+         */
+        private void loadNotebookDimensions(long notebookId) {
+            executor.execute(() -> {
+                try {
+                    int maxRowIndex = cellDao.getMaxRowIndex(notebookId);
+                    int maxColumnIndex = cellDao.getMaxColumnIndex(notebookId);
+                    int rowCount = maxRowIndex + 1; // 索引从0开始，所以行数要+1
+                    int columnCount = maxColumnIndex + 1; // 索引从0开始，所以列数要+1
+                    
+                    // 切换到主线程更新UI
+                    dimensionsText.post(() -> {
+                        String dimensions = rowCount + "行 × " + columnCount + "列";
+                        dimensionsText.setText(dimensions);
+                        dimensionsText.setVisibility(View.VISIBLE);
+                    });
+                } catch (Exception e) {
+                    // 如果出错，隐藏尺寸显示
+                    dimensionsText.post(() -> {
+                        dimensionsText.setVisibility(View.GONE);
+                    });
+                }
+            });
+        }
+        
+        /**
+         * 显示弹出菜单
+         */
+        private void showPopupMenu(View anchor, Notebook notebook) {
+            PopupMenu popup = new PopupMenu(anchor.getContext(), anchor);
+            popup.getMenuInflater().inflate(R.menu.menu_notebook_popup, popup.getMenu());
+            
+            // 根据置顶状态更新菜单项文本
+            MenuItem pinItem = popup.getMenu().findItem(R.id.action_pin);
+            if (pinItem != null) {
+                if (notebook.isPinned()) {
+                    pinItem.setTitle("取消置顶");
+                } else {
+                    pinItem.setTitle("置顶笔记");
+                }
+            }
+            
+            popup.setOnMenuItemClickListener(item -> {
+                if (onMenuActionListener != null) {
+                    int itemId = item.getItemId();
+                    if (itemId == R.id.action_delete) {
+                        onMenuActionListener.onDeleteNotebook(notebook);
+                        return true;
+                    } else if (itemId == R.id.action_pin) {
+                        onMenuActionListener.onPinNotebook(notebook);
+                        return true;
+                    }
+                }
+                return false;
+            });
+            
+            popup.show();
         }
     }
     
@@ -188,10 +277,12 @@ public class NotebookAdapter extends ListAdapter<Notebook, NotebookAdapter.Noteb
         
         @Override
         public boolean areContentsTheSame(@NonNull Notebook oldItem, @NonNull Notebook newItem) {
-            return oldItem.getTitle().equals(newItem.getTitle()) &&
-                   oldItem.getDescription().equals(newItem.getDescription()) &&
+            return Objects.equals(oldItem.getTitle(), newItem.getTitle()) &&
+                   Objects.equals(oldItem.getDescription(), newItem.getDescription()) &&
                    oldItem.getUpdatedAt() == newItem.getUpdatedAt() &&
-                   oldItem.getColor().equals(newItem.getColor());
+                   Objects.equals(oldItem.getColor(), newItem.getColor()) &&
+                   oldItem.isPinned() == newItem.isPinned() &&
+                   oldItem.isDeleted() == newItem.isDeleted();
         }
     };
 }

@@ -2,20 +2,6 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <!-- 排序 -->
-    <item
-        android:id="@+id/action_sort"
-        android:icon="@drawable/ic_sort_24"
-        android:title="排序"
-        app:showAsAction="ifRoom" />
-
-    <!-- 筛选 -->
-    <item
-        android:id="@+id/action_filter"
-        android:icon="@drawable/ic_filter_list_24"
-        android:title="筛选"
-        app:showAsAction="ifRoom" />
-
     <!-- 布局切换 -->
     <item
         android:id="@+id/action_layout"
@@ -28,6 +14,13 @@
         android:id="@+id/action_settings"
         android:icon="@drawable/ic_settings_24"
         android:title="设置"
+        app:showAsAction="never" />
+
+    <!-- 关于 -->
+    <item
+        android:id="@+id/action_about"
+        android:icon="@drawable/ic_info_24"
+        android:title="关于"
         app:showAsAction="never" />
 
 </menu>

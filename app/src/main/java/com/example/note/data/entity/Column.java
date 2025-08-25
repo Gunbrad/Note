@@ -81,6 +81,22 @@ public class Column {
         this.name = name;
     }
     
+    // 复制构造函数
+    public Column(Column other) {
+        this.id = other.id;
+        this.notebookId = other.notebookId;
+        this.columnIndex = other.columnIndex;
+        this.name = other.name;
+        this.width = other.width;
+        this.type = other.type;
+        this.sortOrder = other.sortOrder;
+        this.filterValue = other.filterValue;
+        this.isVisible = other.isVisible;
+        this.isFrozen = other.isFrozen;
+        this.createdAt = other.createdAt;
+        this.updatedAt = other.updatedAt;
+    }
+    
     // Getters and Setters
     public long getId() {
         return id;

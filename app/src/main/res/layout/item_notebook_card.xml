@@ -13,63 +13,43 @@
     app:rippleColor="?attr/colorControlHighlight"
     app:strokeWidth="0dp">
 
-    <LinearLayout
+    <RelativeLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
         android:padding="16dp">
 
-        <!-- 顶部区域：颜色指示器和状态图标 -->
-        <RelativeLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp">
+        <!-- 左上角图标 -->
+        <ImageView
+            android:id="@+id/notebook_icon"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_alignParentStart="true"
+            android:layout_alignParentTop="true"
+            android:src="@drawable/ic_notebook_24"
+            android:contentDescription="笔记本图标"
+            app:tint="?attr/colorPrimary" />
 
-            <!-- 颜色指示器 -->
-            <View
-                android:id="@+id/color_indicator"
-                android:layout_width="4dp"
-                android:layout_height="24dp"
-                android:layout_alignParentStart="true"
-                android:layout_centerVertical="true"
-                android:background="@color/default_notebook_color"
-                tools:background="#FF5722" />
-
-            <!-- 状态图标 -->
-            <ImageView
-                android:id="@+id/status_icon"
-                android:layout_width="20dp"
-                android:layout_height="20dp"
-                android:layout_centerVertical="true"
-                android:layout_marginStart="12dp"
-                android:layout_toEndOf="@id/color_indicator"
-                android:contentDescription="状态图标"
-                android:visibility="gone"
-                app:tint="?attr/colorOnSurfaceVariant"
-                tools:src="@drawable/ic_pin_24"
-                tools:visibility="visible" />
-
-            <!-- 更多按钮 -->
-            <ImageView
-                android:id="@+id/more_icon"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:layout_alignParentEnd="true"
-                android:layout_centerVertical="true"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="更多选项"
-                android:padding="2dp"
-                android:src="@drawable/ic_more_vert_24"
-                app:tint="?attr/colorOnSurfaceVariant" />
-
-        </RelativeLayout>
+        <!-- 右上角更多按钮 -->
+        <ImageView
+            android:id="@+id/more_icon"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_alignParentEnd="true"
+            android:layout_alignParentTop="true"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="更多选项"
+            android:padding="2dp"
+            android:src="@drawable/ic_more_vert_24"
+            app:tint="?attr/colorOnSurfaceVariant" />
 
         <!-- 标题 -->
         <TextView
             android:id="@+id/title_text_view"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="4dp"
+            android:layout_below="@id/notebook_icon"
+            android:layout_marginTop="12dp"
+            android:layout_marginEnd="32dp"
             android:ellipsize="end"
             android:maxLines="2"
             android:textColor="?attr/colorOnSurface"
@@ -77,52 +57,44 @@
             android:textStyle="bold"
             tools:text="民宿房间信息表" />
 
-        <!-- 副标题 -->
+        <!-- 左下角：长*宽 -->
         <TextView
-            android:id="@+id/subtitle_text_view"
-            android:layout_width="match_parent"
+            android:id="@+id/dimensions_text_view"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:ellipsize="end"
-            android:maxLines="1"
+            android:layout_alignParentStart="true"
+            android:layout_alignParentBottom="true"
+            android:layout_marginTop="16dp"
             android:textColor="?attr/colorOnSurfaceVariant"
-            android:textSize="14sp"
-            tools:text="12 个单元格" />
+            android:textSize="12sp"
+            tools:text="10×5" />
 
-        <!-- 底部区域：时间和预览 -->
-        <LinearLayout
-            android:layout_width="match_parent"
+        <!-- 右下角：更新时间 -->
+        <TextView
+            android:id="@+id/time_text_view"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:layout_alignParentEnd="true"
+            android:layout_alignParentBottom="true"
+            android:layout_marginTop="16dp"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:textSize="12sp"
+            tools:text="2小时前" />
 
-            <!-- 时间 -->
-            <TextView
-                android:id="@+id/time_text_view"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="?attr/colorOnSurfaceVariant"
-                android:textSize="12sp"
-                tools:text="2小时前" />
+        <!-- 隐藏的状态图标（用于置顶等状态） -->
+        <ImageView
+            android:id="@+id/status_icon"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_alignParentEnd="true"
+            android:layout_below="@id/notebook_icon"
+            android:layout_marginTop="4dp"
+            android:layout_marginEnd="4dp"
+            android:contentDescription="状态图标"
+            android:visibility="gone"
+            app:tint="?attr/colorPrimary"
+            tools:src="@drawable/ic_pin_24" />
 
-            <!-- 预览缩略图（可选） -->
-            <ImageView
-                android:id="@+id/preview_image"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/bg_preview_placeholder"
-                android:contentDescription="预览图"
-                android:scaleType="centerCrop"
-                android:visibility="gone"
-                tools:src="@drawable/ic_image_24"
-                tools:visibility="visible" />
-
-        </LinearLayout>
-
-    </LinearLayout>
+    </RelativeLayout>
 
 </com.google.android.material.card.MaterialCardView>

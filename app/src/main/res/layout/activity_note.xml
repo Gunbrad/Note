@@ -81,15 +81,7 @@
                     android:minWidth="0dp"
                     android:paddingHorizontal="12dp" />
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/redo_button"
-                    style="@style/Widget.Material3.Button.TextButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="36dp"
-                    android:text="重做"
-                    android:textSize="12sp"
-                    android:minWidth="0dp"
-                    android:paddingHorizontal="12dp" />
+
 
             </LinearLayout>
 
@@ -162,15 +154,22 @@
                     android:scrollbars="none"
                     android:overScrollMode="never" />
 
-                <!-- 数据单元格区域 -->
-                <androidx.recyclerview.widget.RecyclerView
-                    android:id="@+id/data_grid_recycler"
+                <!-- 数据单元格区域（支持缩放和拖拽） -->
+                <com.example.note.ui.note.ZoomPanLayout
+                    android:id="@+id/zoom_pan_layout"
                     android:layout_width="0dp"
                     android:layout_height="match_parent"
-                    android:layout_weight="1"
-                    android:background="#FFFFFF"
-                    android:scrollbars="none"
-                    android:overScrollMode="never" />
+                    android:layout_weight="1">
+                    
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/data_grid_recycler"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="#FFFFFF"
+                        android:scrollbars="none"
+                        android:overScrollMode="never" />
+                        
+                </com.example.note.ui.note.ZoomPanLayout>
 
             </LinearLayout>
 
